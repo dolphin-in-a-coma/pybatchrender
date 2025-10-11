@@ -1,9 +1,21 @@
 import math
 from dataclasses import dataclass
 import random
+import numpy as np
+import torch
+import time
+import matplotlib.pyplot as plt
+from torchrl.envs import EnvBase
+from tensordict import TensorDict
+from torchrl.data.tensor_specs import (
+    CompositeSpec,
+    BoundedTensorSpec,
+    DiscreteTensorSpec,
+    UnboundedContinuousTensorSpec,
+)
 from direct.showbase.ShowBase import ShowBase
 from direct.showbase.ShowBaseGlobal import globalClock
-from panda3d.core import loadPrcFileData, LPoint3, AmbientLight, DirectionalLight, Vec3
+from panda3d.core import loadPrcFileData, LPoint3, AmbientLight, DirectionalLight, Vec3, Texture
 
 
 # Utility: recenter model so bounds-relative point 'rel' becomes origin
@@ -35,6 +47,7 @@ class CartPoleConfig:
     width: int = 640 
     height: int = 640
     show_fps: bool = True
+    offscreen: bool = False
 
     # Physics
     dt: float = 1 / 120
@@ -61,6 +74,7 @@ class CartPoleConfig:
 
     # Reset thresholds
     theta_threshold_deg: float = 90.0  # pole fall threshold (|theta| > this)
+    warmup_steps: int = 0
 
 
 class CarPoleLogic:
@@ -121,15 +135,18 @@ class CarPoleLogic:
         return 0.0 if self.should_reset() else 1.0
 
 class CartPoleRenderer(ShowBase):
-    def __init__(self, cfg: CartPoleConfig, logic: CarPoleLogic):
+    def __init__(self, cfg: CartPoleConfig, logic: CarPoleLogic, schedule_update: bool = True, external_control: bool = False):
         loadPrcFileData('', f'show-frame-rate-meter {1 if cfg.show_fps else 0}\n')
         loadPrcFileData('', f'sync-video 0\n')
         loadPrcFileData('', f'win-size {cfg.width} {cfg.height}\n')
+        if cfg.offscreen:
+            loadPrcFileData('', 'window-type offscreen\n')
 
         super().__init__()
 
         self.cfg = cfg
         self.logic = logic
+        self.external_control = bool(external_control)
 
         self.disableMouse() # allows for static camera
 
@@ -144,8 +161,11 @@ class CartPoleRenderer(ShowBase):
         # Scene
         self._build_scene()
 
-        # Update
-        self.taskMgr.add(self._update, 'update')
+        # Update (optional; RL wrappers can disable task scheduling)
+        if schedule_update:
+            self.taskMgr.add(self._update, 'update')
+
+        # self._warmup()
 
     def _build_scene(self):
         # Cart
@@ -184,6 +204,35 @@ class CartPoleRenderer(ShowBase):
         self._update_camera()
 
         self._add_lights()
+        self._setup_offscreen_rt()
+
+    def grab_pixels(self) -> np.ndarray:
+        # Read pixels from the offscreen texture (uint8 HxWx3); rendering happens via taskMgr
+        tex = getattr(self, 'offscreen_tex', None)
+        if tex is None:
+            return np.zeros((int(self.cfg.height), int(self.cfg.width), 3), dtype=np.uint8)
+        # Pull latest GPU texture into RAM on every read
+        try:
+            self.graphicsEngine.extractTextureData(tex, self.win.getGsg())
+        except Exception:
+            pass
+        # Determine actual texture size
+        w = int(tex.getXSize()) or int(self.cfg.width)
+        h = int(tex.getYSize()) or int(self.cfg.height)
+        # Fetch raw bytes
+        try:
+            data = tex.getRamImageAs('RGB')
+        except Exception:
+            data = tex.getRamImage()
+        arr = np.frombuffer(data, dtype=np.uint8)
+        num_pixels = max(1, w * h)
+        channels = arr.size // num_pixels if num_pixels else 0
+        if channels and channels != 3:
+            arr = arr.reshape((h, w, channels))[..., :3]
+        else:
+            arr = arr.reshape((h, w, 3)) if arr.size >= w * h * 3 else np.zeros((h, w, 3), dtype=np.uint8)
+        # Flip vertically to match conventional image coordinates and ensure contiguous buffer
+        return np.flipud(arr).copy()
 
     def _add_lights(self):
         alight = AmbientLight('ambient')
@@ -196,6 +245,19 @@ class CartPoleRenderer(ShowBase):
         dlnp = self.render.attachNewNode(dlight)
         dlnp.lookAt(Vec3(-0.5, -1.0, -1.5))
         self.render.setLight(dlnp)
+
+    def _setup_offscreen_rt(self):
+        # Create an offscreen buffer with an attached color texture matching the display size
+        w, h = int(self.cfg.width), int(self.cfg.height)
+        self.offscreen_buffer = self.win.makeTextureBuffer('cartpole-rt', w, h)
+        self.offscreen_tex = self.offscreen_buffer.getTexture()
+        if self.offscreen_tex is not None:
+            self.offscreen_tex.setKeepRamImage(True)
+            self.offscreen_tex.setCompression(Texture.CMOff)
+        # Create a camera rendering to this buffer; share lens and transform with main camera
+        self.offscreen_cam = self.makeCamera(self.offscreen_buffer)
+        self.offscreen_cam.node().setLens(self.camLens)
+        self.offscreen_cam.reparentTo(self.camera)
 
     def _on_key(self, which: str, down: bool):
         if which == 'left':
@@ -227,17 +289,119 @@ class CartPoleRenderer(ShowBase):
         steps = max(1, int(round(dt / self.cfg.dt)))
         sub_dt = dt / steps
         for _ in range(steps):
-            self._apply_input()
+            if not self.external_control:
+                self._apply_input()
             self.logic.step(sub_dt)
 
         self._update_transforms()
         if self.logic.should_reset():
             self.logic.reset()
         return task.cont
+    
+    # def _warmup(self):
+    #     for _ in range(self.cfg.warmup_steps):
+    #         self.taskMgr.step()
+
+class CartPoleTorchEnv(EnvBase):
+    def __init__(self, cfg: CartPoleConfig | None = None, device: torch.device | None = None):
+        super().__init__(device=device if device is not None else torch.device('cpu'))
+        self.cfg = cfg or CartPoleConfig(offscreen=True, show_fps=False)
+        # Build logic and renderer without scheduling Panda3D tasks
+        self.logic = CarPoleLogic(self.cfg)
+        # Enable scheduled updates and disable keyboard control influence
+        self.renderer = CartPoleRenderer(self.cfg, self.logic, schedule_update=True, external_control=True)
+        # Specs
+        h, w = self.cfg.height, self.cfg.width
+        self.observation_spec = CompositeSpec(
+            pixels=BoundedTensorSpec(
+                shape=torch.Size([h, w, 3]), dtype=torch.uint8, minimum=0, maximum=255
+            )
+        )
+        self.action_spec = DiscreteTensorSpec(n=3, shape=torch.Size([]), dtype=torch.int64)
+        self.reward_spec = UnboundedContinuousTensorSpec(shape=torch.Size([1]))
+        self.done_spec = DiscreteTensorSpec(n=2, shape=torch.Size([1]), dtype=torch.int64)
+
+
+    def _reset(self, tensordict: TensorDict | None = None) -> TensorDict:
+        self.logic.reset()
+        # Step the engine once to propagate transforms and render to RTT
+        self.renderer.taskMgr.step()
+        obs_np = self.renderer.grab_pixels()
+        obs = torch.from_numpy(obs_np)
+        done = torch.tensor([0], dtype=torch.int64)
+        reward = torch.tensor([0.0], dtype=torch.float32)
+        return TensorDict({'pixels': obs, 'done': done, 'reward': reward}, batch_size=[])
+
+    def _step(self, tensordict: TensorDict) -> TensorDict:
+        action = tensordict.get('action')
+        if isinstance(action, TensorDict):
+            action = action.get('action')
+        a = int(action.item()) if action.numel() == 1 else int(action)
+        # Map action to force: 0=left, 1=none, 2=right
+        if a == 0:
+            self.logic.set_force(-self.cfg.force_mag)
+        elif a == 2:
+            self.logic.set_force(self.cfg.force_mag)
+        else:
+            self.logic.set_force(0.0)
+
+        # Advance via Panda3D task manager (updates physics, transforms, draw)
+        self.renderer.taskMgr.step()
+        obs_np = self.renderer.grab_pixels()
+        obs = torch.from_numpy(obs_np)
+
+        done = torch.tensor([1] if self.logic.should_reset() else [0], dtype=torch.int64)
+        reward = torch.tensor([self.logic.compute_reward()], dtype=torch.float32)
+
+        if done.item():
+            # Auto-reset semantics: reset on termination and provide next obs
+            self.logic.reset()
+            self.renderer._update_transforms()
+
+        out = TensorDict({'pixels': obs, 'done': done, 'reward': reward}, batch_size=[])
+        return out
+
+    def _set_seed(self, seed: int | None = None) -> None:
+        if seed is None:
+            seed = int(time.time() * 1e6) % (2**32 - 1)
+        self._seed = int(seed)
+        random.seed(self._seed)
+        np.random.seed(self._seed % (2**32 - 1))
+        try:
+            torch.manual_seed(self._seed)
+        except Exception:
+            pass
 
 
 if __name__ == '__main__':
-    cfg = CartPoleConfig()
-    logic = CarPoleLogic(cfg)
-    app = CartPoleRenderer(cfg, logic)
-    app.run()
+    # Benchmark: run N random steps, plot every K frames, and print FPS
+    cfg = CartPoleConfig(offscreen=True, width=64, height=64, show_fps=False)
+    env = CartPoleTorchEnv(cfg)
+
+    N = 1000
+    K = 0
+
+    td = env.reset()
+    start = time.time()
+    imgs = []
+    for i in range(N):
+        action = torch.randint(low=0, high=3, size=())
+        out = env.step(TensorDict({'action': action}, batch_size=[]))
+        if K > 0 and (i % K) == 0:
+            imgs.append(out['next','pixels'].cpu().numpy().copy())
+        if out['next','done'].item():
+            td = env.reset()
+    elapsed = time.time() - start
+    fps = N / max(1e-6, elapsed)
+    print(f"Steps: {N}, elapsed: {elapsed:.3f}s, FPS: {fps:.1f}")
+
+    # Plot collected frames
+    cols = min(len(imgs), 5)
+    rows = int(np.ceil(len(imgs) / max(1, cols)))
+    plt.figure(figsize=(2 * cols, 2 * rows))
+    for idx, im in enumerate(imgs):
+        plt.subplot(rows, cols, idx + 1)
+        plt.imshow(im)
+        plt.axis('off')
+    plt.tight_layout()
+    plt.show()
