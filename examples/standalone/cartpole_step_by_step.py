@@ -4,6 +4,8 @@ import random
 import numpy as np
 import torch
 import time
+import os
+import multiprocessing as mp
 import matplotlib.pyplot as plt
 from torchrl.envs import EnvBase
 from tensordict import TensorDict
@@ -142,6 +144,19 @@ class CartPoleRenderer(ShowBase):
         if cfg.offscreen:
             loadPrcFileData('', 'window-type offscreen\n')
 
+        loadPrcFileData('', 'audio-library-name null') # disable audio
+        loadPrcFileData('', 'textures-power-2 none') # disable power of 2 textures
+        # loadPrcFileData('', 'gl-version 3 2') # Seems to be key command for shader
+
+        # Some Panda3D settings that may be used later
+        # loadPrcFileData("", "framebuffer-multisample false") # ~5%
+        # loadPrcFileData('', 'multisamples 0')
+        # loadPrcFileData('', 'load-display pandagl')
+        # loadPrcFileData('', 'gl-version 4 6')  # 7% speed-up with pandagl, even speed 20% speed up on Mac
+        # loadPrcFileData("", "sync-flip 0")                   # skip extra driver wait
+        # loadPrcFileData("", "support-threads 1")             # let Panda spin draw-thread
+        # loadPrcFileData("", "threading-model Cull/Draw")     # gives highest FPS with egl
+
         super().__init__()
 
         self.cfg = cfg
@@ -258,6 +273,14 @@ class CartPoleRenderer(ShowBase):
         self.offscreen_cam = self.makeCamera(self.offscreen_buffer)
         self.offscreen_cam.node().setLens(self.camLens)
         self.offscreen_cam.reparentTo(self.camera)
+        # Disable default onscreen display regions that use the main camera
+        try:
+            for dr in self.win.getDisplayRegions():
+                cam_np = dr.getCamera()
+                if not cam_np.isEmpty() and cam_np == self.cam:
+                    dr.setActive(False)
+        except Exception:
+            pass
 
     def _on_key(self, which: str, down: bool):
         if which == 'left':
@@ -373,35 +396,176 @@ class CartPoleTorchEnv(EnvBase):
             pass
 
 
+# ---------- Parallel helpers (spawn-safe) ----------
+def _cfg_to_dict(cfg: CartPoleConfig) -> dict:
+    return {
+        'width': cfg.width,
+        'height': cfg.height,
+        'show_fps': False,
+        'offscreen': True,
+        'dt': cfg.dt,
+        'g': cfg.g,
+        'm_c': cfg.m_c,
+        'm_p': cfg.m_p,
+        'force_mag': cfg.force_mag,
+        'linear_damping': cfg.linear_damping,
+        'angular_damping': cfg.angular_damping,
+        'theta_init_range_deg': cfg.theta_init_range_deg,
+        'cart_size': cfg.cart_size,
+        'pole_size': cfg.pole_size,
+        'rail_size': cfg.rail_size,
+        'cart_color': cfg.cart_color,
+        'pole_color': cfg.pole_color,
+        'rail_color': cfg.rail_color,
+        'cam_position': cfg.cam_position,
+        'cam_look_at': cfg.cam_look_at,
+        'theta_threshold_deg': cfg.theta_threshold_deg,
+        'warmup_steps': 0,
+    }
+
+
+def _cfg_from_dict(d: dict) -> CartPoleConfig:
+    return CartPoleConfig(**d)
+
+
+def _env_worker(conn, cfg_dict: dict, seed: int, plot_every: int = 0, plot_dir: str = 'plots', worker_id: int = 0):
+    try:
+        # Local import with non-interactive backend for plotting in subprocess
+        import matplotlib
+        matplotlib.use('Agg')
+        import matplotlib.pyplot as _plt
+
+        cfg = _cfg_from_dict(cfg_dict)
+        env = CartPoleTorchEnv(cfg)
+        env._set_seed(seed)
+        td = env.reset()
+        # signal ready
+        conn.send(('ready', None))
+        os.makedirs(plot_dir, exist_ok=True)
+        step_count = 0
+        while True:
+            cmd, data = conn.recv()
+            if cmd == 'reset':
+                td = env.reset()
+                obs = td.get('pixels', None)
+                if obs is None:
+                    obs = td['next', 'pixels']
+                conn.send({'pixels': obs.cpu().numpy().copy(), 'done': False, 'reward': 0.0})
+            elif cmd == 'step':
+                action = int(data)
+                out = env.step(TensorDict({'action': torch.tensor(action)}, batch_size=[]))
+                pix = out['next', 'pixels'].cpu().numpy().copy()
+                done = bool(out['next', 'done'].item())
+                rew = float(out['next', 'reward'].item()) if ('next', 'reward') in out.keys(True, True) else float(env.logic.compute_reward())
+                # Optional per-process plotting
+                step_count += 1
+                if plot_every > 0 and (step_count % plot_every) == 0:
+                    _plt.figure(figsize=(2, 2))
+                    _plt.imshow(pix)
+                    _plt.axis('off')
+                    _plt.tight_layout()
+                    _plt.savefig(os.path.join(plot_dir, f'env_{worker_id:02d}_step_{step_count}.png'))
+                    _plt.close()
+                conn.send({'pixels': pix, 'done': done, 'reward': rew})
+            elif cmd == 'close':
+                break
+    except Exception as e:
+        try:
+            conn.send(('error', str(e)))
+        except Exception:
+            pass
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+
+class ParallelCartPole:
+    def __init__(self, num_envs: int, cfg: CartPoleConfig, plot_every: int = 0, plot_dir: str = 'plots'):
+        ctx = mp.get_context('spawn')
+        self.conns = []
+        self.procs = []
+        cfg_dict = _cfg_to_dict(cfg)
+        base_seed = int(time.time() * 1e6) % (2**31 - 1)
+        for i in range(num_envs):
+            parent, child = ctx.Pipe()
+            p = ctx.Process(target=_env_worker, args=(child, cfg_dict, base_seed + i, int(plot_every), str(plot_dir), i))
+            p.start()
+            self.conns.append(parent)
+            self.procs.append(p)
+        # Wait for ready
+        for c in self.conns:
+            msg, _ = c.recv()
+            if msg != 'ready':
+                raise RuntimeError('Worker failed to initialize')
+
+    def reset(self):
+        for c in self.conns:
+            c.send(('reset', None))
+        outs = [c.recv() for c in self.conns]
+        return outs
+
+    def step(self, actions: list[int]):
+        for c, a in zip(self.conns, actions):
+            c.send(('step', int(a)))
+        outs = [c.recv() for c in self.conns]
+        return outs
+
+    def close(self):
+        for c in self.conns:
+            try:
+                c.send(('close', None))
+            except Exception:
+                pass
+        for p in self.procs:
+            try:
+                p.join(timeout=1.0)
+            except Exception:
+                pass
 if __name__ == '__main__':
-    # Benchmark: run N random steps, plot every K frames, and print FPS
-    cfg = CartPoleConfig(offscreen=True, width=64, height=64, show_fps=False)
-    env = CartPoleTorchEnv(cfg)
+    import argparse
 
-    N = 1000
-    K = 0
+    parser = argparse.ArgumentParser(description='CartPole TorchRL benchmark')
+    parser.add_argument('--mode', choices=['single', 'multi'], default='multi', help='single env or parallel env benchmark')
+    parser.add_argument('--steps', type=int, default=1000, help='number of steps to run')
+    parser.add_argument('--num-envs', type=int, default=8, help='number of env workers (multi only)')
+    parser.add_argument('--width', type=int, default=64, help='observation width')
+    parser.add_argument('--height', type=int, default=64, help='observation height')
+    parser.add_argument('--plot-every', type=int, default=0, help='save a frame every N steps per worker (multi only)')
+    args = parser.parse_args()
 
-    td = env.reset()
-    start = time.time()
-    imgs = []
-    for i in range(N):
-        action = torch.randint(low=0, high=3, size=())
-        out = env.step(TensorDict({'action': action}, batch_size=[]))
-        if K > 0 and (i % K) == 0:
-            imgs.append(out['next','pixels'].cpu().numpy().copy())
-        if out['next','done'].item():
-            td = env.reset()
-    elapsed = time.time() - start
-    fps = N / max(1e-6, elapsed)
-    print(f"Steps: {N}, elapsed: {elapsed:.3f}s, FPS: {fps:.1f}")
-
-    # Plot collected frames
-    cols = min(len(imgs), 5)
-    rows = int(np.ceil(len(imgs) / max(1, cols)))
-    plt.figure(figsize=(2 * cols, 2 * rows))
-    for idx, im in enumerate(imgs):
-        plt.subplot(rows, cols, idx + 1)
-        plt.imshow(im)
-        plt.axis('off')
-    plt.tight_layout()
-    plt.show()
+    if args.mode == 'multi':
+        mp.set_start_method('spawn', force=True)
+        cfg = CartPoleConfig(offscreen=True, width=args.width, height=args.height, show_fps=False)
+        vec = ParallelCartPole(args.num_envs, cfg, plot_every=args.plot_every, plot_dir='plots_parallel')
+        _ = vec.reset()
+        t0 = time.perf_counter()
+        for _ in range(args.steps):
+            actions = np.random.randint(0, 3, size=(args.num_envs,)).tolist()
+            _ = vec.step(actions)
+        dt = time.perf_counter() - t0
+        total_frames = args.steps * args.num_envs
+        print(f"ParallelEnv {args.num_envs} envs: {total_frames} total steps in {dt:.3f}s → {total_frames/dt:.1f} FPS")
+        vec.close()
+    else:
+        cfg = CartPoleConfig(offscreen=True, width=args.width, height=args.height, show_fps=False)
+        env = CartPoleTorchEnv(cfg)
+        td = env.reset()
+        t0 = time.perf_counter()
+        plot_dir = 'plots_single'
+        if args.plot_every > 0:
+            os.makedirs(plot_dir, exist_ok=True)
+        for i in range(args.steps):
+            action = torch.randint(low=0, high=3, size=())
+            out = env.step(TensorDict({'action': action}, batch_size=[]))
+            if args.plot_every > 0 and ((i + 1) % args.plot_every) == 0:
+                img = out['next','pixels'].cpu().numpy()
+                plt.figure(figsize=(2, 2))
+                plt.imshow(img)
+                plt.axis('off')
+                plt.tight_layout()
+                plt.savefig(os.path.join(plot_dir, f'step_{i+1}.png'))
+                plt.close()
+        dt = time.perf_counter() - t0
+        print(f"SingleEnv: {args.steps} steps in {dt:.3f}s → {args.steps/dt:.1f} FPS")
