@@ -1,6 +1,6 @@
 import math
 from dataclasses import dataclass
-
+import random
 from direct.showbase.ShowBase import ShowBase
 from direct.showbase.ShowBaseGlobal import globalClock
 from panda3d.core import loadPrcFileData, LPoint3, AmbientLight, DirectionalLight, Vec3
@@ -32,8 +32,8 @@ def bake_pivot_to_rel(model, rel=(0.5, 0.5, 0.5)):
 @dataclass
 class CartPoleConfig:
     # Window / context
-    width: int = 640 // 4
-    height: int = 640 // 4
+    width: int = 640 
+    height: int = 640
     show_fps: bool = True
 
     # Physics
@@ -41,31 +41,41 @@ class CartPoleConfig:
     g: float = 9.8
     m_c: float = 1.0
     m_p: float = 0.1
-    length: float = 0.5  # half pole length used by the standard equations
     force_mag: float = 10.0
     linear_damping: float = 0.5
     angular_damping: float = 0.2
+    theta_init_range_deg: tuple[float, float] = (-5, 5)
 
     # Visual scales
     cart_size: tuple[float, float, float] = (1.2, 0.8, 0.5)
     pole_size: tuple[float, float, float] = (0.1, 0.1, 2.0)
+    rail_size: tuple[float, float, float] = (6.0, 0.05, 0.05)
+
+    cart_color: tuple[float, float, float, float] = (0.6, 0.8, 1.0, 1.0)
+    pole_color: tuple[float, float, float, float] = (1.0, 0.7, 0.2, 1.0)
+    rail_color: tuple[float, float, float, float] = (0.2, 0.2, 0.2, 1.0)
 
     # Camera follow
     cam_position: tuple[float, float, float] = (-7, -12.0, 2.0)
     cam_look_at: tuple[float, float, float] = (0.0, 0.0, 0.0)
+
+    # Reset thresholds
+    theta_threshold_deg: float = 90.0  # pole fall threshold (|theta| > this)
 
 
 class CarPoleLogic:
     def __init__(self, cfg: CartPoleConfig):
         self.cfg = cfg
         self.total_m = cfg.m_c + cfg.m_p
-        self.poleml = cfg.m_p * cfg.length
+        self.pole_length = cfg.pole_size[2]
+        self.poleml = cfg.m_p * self.pole_length # TODO: add actual physics, given that pole is pointed not exactly to its base
         self.reset()
 
     def reset(self):
         self.x = 0.0
         self.x_dot = 0.0
-        self.theta = 0.0
+        theta_deg = random.uniform(self.cfg.theta_init_range_deg[0], self.cfg.theta_init_range_deg[1])
+        self.theta = math.radians(theta_deg)
         self.theta_dot = 0.0
         self.force = 0.0
 
@@ -79,7 +89,7 @@ class CarPoleLogic:
 
         temp = (self.force + self.poleml * (self.theta_dot * self.theta_dot) * sintheta) / self.total_m
         thetaacc = (self.cfg.g * sintheta - costheta * temp) / (
-            self.cfg.length * (4.0 / 3.0 - self.cfg.m_p * (costheta * costheta) / self.total_m)
+            self.pole_length * (4.0 / 3.0 - self.cfg.m_p * (costheta * costheta) / self.total_m)
         )
         xacc = temp - (self.poleml * thetaacc * costheta) / self.total_m
 
@@ -94,6 +104,18 @@ class CarPoleLogic:
 
         self.x += dt * self.x_dot
         self.theta += dt * self.theta_dot
+
+    def should_reset(self) -> bool:
+        # Leaving the edges of the rail
+        half_rail = self.cfg.rail_size[0] * 0.5
+        half_cart = self.cfg.cart_size[0] * 0.5
+        if abs(self.x) > half_rail - half_cart:
+            return True
+        
+        # The pole is falling (beyond angle threshold)
+        if abs(math.degrees(self.theta)) > self.cfg.theta_threshold_deg:
+            return True
+        return False
 
 
 class CartPoleRenderer(ShowBase):
@@ -127,7 +149,7 @@ class CartPoleRenderer(ShowBase):
         # Cart
         self.cart_np = self.loader.loadModel('models/box')
         self.cart_np.reparentTo(self.render)
-        self.cart_np.setColor(0.6, 0.8, 1.0, 1.0)
+        self.cart_np.setColor(*self.cfg.cart_color)
         self.cart_np.setScale(*self.cfg.cart_size)
         self.cart_np.setTextureOff(1)
         bake_pivot_to_rel(self.cart_np, (0.5, 0.5, 0.5))
@@ -141,7 +163,7 @@ class CartPoleRenderer(ShowBase):
         # Pole (child of hinge). Translate up by half its length so base sits on hinge
         self.pole_np = self.loader.loadModel('models/box')
         self.pole_np.reparentTo(self.hinge_np)
-        self.pole_np.setColor(1.0, 0.7, 0.2, 1.0)
+        self.pole_np.setColor(*self.cfg.pole_color)
         self.pole_np.setScale(*self.cfg.pole_size)
         self.pole_np.setTextureOff(1)
         bake_pivot_to_rel(self.pole_np, (0.5, 0.5, 0.5))
@@ -150,8 +172,8 @@ class CartPoleRenderer(ShowBase):
         # Rail (visual reference)
         self.rail_np = self.loader.loadModel('models/box')
         self.rail_np.reparentTo(self.render)
-        self.rail_np.setColor(0.2, 0.2, 0.2, 1.0)
-        self.rail_np.setScale(6.0, 0.05, 0.05)
+        self.rail_np.setColor(*self.cfg.rail_color)
+        self.rail_np.setScale(*self.cfg.rail_size)
         self.rail_np.setTextureOff(1)
         bake_pivot_to_rel(self.rail_np, (0.5, 0.5, 0.5))
         self.rail_np.setPos(0.0, 0.0, 0.0)
@@ -207,6 +229,8 @@ class CartPoleRenderer(ShowBase):
             self.logic.step(sub_dt)
 
         self._update_transforms()
+        if self.logic.should_reset():
+            self.logic.reset()
         return task.cont
 
 
