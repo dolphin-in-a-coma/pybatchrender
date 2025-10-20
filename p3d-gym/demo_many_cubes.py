@@ -17,7 +17,7 @@ except ImportError:
 
 class Demo(P3DRenderer):
     def __init__(self):
-        num_scenes = 128
+        num_scenes = 1024
         instances_per_scene = 3
         super().__init__(num_scenes=num_scenes, offscreen=True)
         self.cam.setPos(0, -50, 10)
@@ -120,26 +120,13 @@ if __name__ == '__main__':
     import matplotlib.pyplot as plt
     app = Demo()
     num_steps = 100000
-    plot_every = 100
-    imgs = []
+    plot_every = -1
     for i in range(num_steps):
-        #img = app.taskMgr.step()
-        # print("stepping...", i)
         img = app.step_and_grab()
         if plot_every > 0 and i % plot_every == 0:
-            imgs.append(img)
-        # print(img.shape)
-
-
             plt.figure(figsize=(10, 10))
-            # for i, img in enumerate(imgs):
-            #     plt.subplot(10, 10, i + 1)
-            #     plt.imshow(img.cpu())
-            #     plt.axis('off')
-
             plt.imshow(img.cpu())
-
-
-            plt.savefig('imgs.png')
+            plt.savefig(f'img_cartpole_{i}.png')
             plt.show()
             plt.close()
+

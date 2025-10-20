@@ -12,9 +12,9 @@ except ImportError:
 
 class CartPoleDemo(P3DRenderer):
     def __init__(self):
-        num_scenes = 512*8
+        num_scenes = 1024 # ~1024 is the best on Mac, ~8k is the best on L4
         instances_per_scene = 1
-        super().__init__(tile_resolution=(256,256), num_scenes=num_scenes)
+        super().__init__(tile_resolution=(64,64), num_scenes=num_scenes, offscreen=True)
         print(self.cfg)
         self.cam.setPos(0, -50, 10)
         self.cam.lookAt(0, 0, 0)
@@ -106,16 +106,17 @@ class CartPoleDemo(P3DRenderer):
 
 
 if __name__ == '__main__':
+    import matplotlib.pyplot as plt
     app = CartPoleDemo()
-    num_steps = 100000
+    num_steps = 10000
     plot_every = -1
     imgs = []
     for i in range(num_steps):
         img = app.step_and_grab()
-        # if plot_every > 0 and i % plot_every == 0:
-        #     imgs.append(img)
-        # print(img.shape)
-
-    # app.run()
-
+        if plot_every > 0 and i % plot_every == 0:
+            plt.figure(figsize=(10, 10))
+            plt.imshow(img.cpu())
+            plt.savefig(f'img_cartpole_{i}.png')
+            plt.show()
+            plt.close()
 
