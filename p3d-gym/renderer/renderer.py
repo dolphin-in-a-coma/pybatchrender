@@ -65,7 +65,7 @@ class P3DRenderer(ShowBase):
             except Exception:
                 pass
 
-        self.taskMgr.doMethodLater(0, self._init_frame_grabber_once, 'init_frame_grabber_once')
+        # self.taskMgr.doMethodLater(0, self._init_frame_grabber_once, 'init_frame_grabber_once')
 
     # --- Node helpers (mirroring P3DScene) ---
     def add_node(self,

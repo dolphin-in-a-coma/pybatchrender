@@ -65,6 +65,8 @@ class Demo(P3DRenderer):
         # self.taskMgr.add(self.update_camera, 'update_camera')
         self.taskMgr.add(self.update_instances, 'update_instances')
 
+        self.taskMgr.doMethodLater(0, self._init_grabber_once, 'init-grabber-once')
+
     def update_instances(self, task):
         from direct.showbase.ShowBaseGlobal import globalClock
         t = float(globalClock.getFrameTime())
