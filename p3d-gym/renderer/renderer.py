@@ -215,7 +215,7 @@ class P3DRenderer(ShowBase):
 
     def _init_frame_grabber_once(self, task):
 
-        self._warmup()
+        # self._warmup()
                     
         # Optional GPU grabber (CuPy + CUDA)
         if getattr(self, 'offscreen_tex', None) is None:
