@@ -12,7 +12,10 @@ try:
     from OpenGL.GL import GL_TEXTURE_2D  # type: ignore
     GPU_AVAILABLE = True
     # torch = torch 
-except Exception:
+except Exception as e:
+    print("Error importing CUDA/CuPy/OpenGL:", e)
+    print("Cuda-OpenGL interop will not be used.")
+
     GPU_AVAILABLE = False
     cudart = None  # type: ignore
     cp = None  # type: ignore
