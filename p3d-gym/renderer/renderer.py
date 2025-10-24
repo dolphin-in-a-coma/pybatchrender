@@ -312,7 +312,7 @@ class P3DRenderer(ShowBase):
         img = img.view(self.cfg.num_channels, self.cfg.tiles[1], self.cfg.tile_resolution[1], self.cfg.tiles[0], self.cfg.tile_resolution[0]) # -> CH R H CL W
         img = img.permute(1, 3, 0, 2, 4) # -> R CL CH H W
         img = img.reshape(-1, self.cfg.num_channels, self.cfg.tile_resolution[1], self.cfg.tile_resolution[0]) # -> B CH H W
-        return img
+        return img[:self.cfg.num_scenes]
 
     def _step(self, *args, **kwargs):
         # Default no-op. Children override this to update scene state per step.

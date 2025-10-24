@@ -5,9 +5,13 @@ import os
 from dataclasses import dataclass, asdict
 
 import math
-from typing import Iterable
+from typing import Iterable, TypeVar
+from torchrl.data.tensor_specs import TensorSpec
 
 import torch
+
+T = TypeVar("T", bound="P3DConfig")
+
 
 @dataclass
 class P3DConfig:
@@ -44,6 +48,13 @@ class P3DConfig:
     cuda_gl_interop: bool = True
 
     interactive: bool = False
+
+    # TorchRL env-related
+    direct_obs_dim: int | None = None
+    action_n: int | None = None
+    action_type: str = 'discrete'
+    max_steps: int = 500
+    auto_reset: bool = True
 
     def process_resolution(self) -> None:
 
@@ -137,13 +148,14 @@ class P3DConfig:
         self.process_device()
 
     @classmethod
-    def from_config(cls, cfg: P3DConfig | dict | None = None, **overrides) -> P3DConfig:
+    def from_config(cls: type[T], cfg: T | dict | None = None, **overrides) -> T:
         if cfg is not None and overrides:
             raise ValueError("cfg and additional keyword arguments cannot be used together")
 
 
         if isinstance(cfg, cls):
             cfg_dict = asdict(cfg)
+            cls = cfg.__class__
         elif isinstance(cfg, dict):
             cfg_dict = cfg
         else:
