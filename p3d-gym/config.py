@@ -43,6 +43,8 @@ class P3DConfig:
     manual_camera_control: bool = False
     cuda_gl_interop: bool = True
 
+    interactive: bool = False
+
     def process_resolution(self) -> None:
 
         if self.tiles is None and self.num_scenes is not None:
