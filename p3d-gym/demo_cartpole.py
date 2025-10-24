@@ -12,7 +12,7 @@ except ImportError:
 
 class CartPoleDemo(P3DRenderer):
     def __init__(self):
-        num_scenes = 1024*4 # ~1024 is the best on Mac, ~8k is the best on L4
+        num_scenes = 1024*8 # ~1024 is the best on Mac, ~8k is the best on L4
         instances_per_scene = 1
         super().__init__(tile_resolution=(64,64), num_scenes=num_scenes, offscreen=True)
 
