@@ -56,6 +56,8 @@ class P3DConfig:
     max_steps: int = 500
     auto_reset: bool = True
 
+    num_workers: int = 1
+
     def process_resolution(self) -> None:
 
         if self.tiles is None and self.num_scenes is not None:

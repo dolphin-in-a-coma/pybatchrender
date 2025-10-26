@@ -2,7 +2,7 @@ from abc import ABC, abstractmethod
 import math
 import torch
 from tensordict import TensorDict
-from torchrl.envs import EnvBase
+from torchrl.envs import EnvBase, ParallelEnv
 from torchrl.data.tensor_specs import Composite, Unbounded, Categorical
 
 # Optional renderer / config (kept optional to avoid hard deps when not rendering)
@@ -103,6 +103,9 @@ class P3DEnv(EnvBase, ABC):
         out_dir: str | None = None,
         filename_prefix: str = "batch_example",
     ) -> str:
+
+        if self.cfg.num_workers > 1 and self.cfg.worker_index != 0:
+            return
         """
         Save a single image grid composed of N batch elements.
 
@@ -191,6 +194,70 @@ class P3DEnv(EnvBase, ABC):
                     raise RuntimeError(f"Failed to save image: {e}")
 
         return str(fpath)
+
+    @classmethod
+    def make_parallel_env(
+        cls,
+        *,
+        config: "P3DConfig",
+        renderer_cls: type["P3DRenderer"],
+        num_workers: int,
+        mp_start_method: str = "spawn",
+        shared_memory: bool = True,
+    ) -> ParallelEnv:
+        """
+        Generic factory to create a TorchRL ParallelEnv for any P3DEnv subclass.
+        """
+        import multiprocessing as mp
+
+        try:
+            mp.set_start_method(mp_start_method, force=True)
+        except RuntimeError:
+            # start method already set in this process
+            pass
+
+        create_env_kwargs = [
+            {
+                "env_cls": cls,
+                "renderer_cls": renderer_cls,
+                "config": config,
+                "worker_index": i,
+                "num_workers": num_workers,
+            }
+            for i in range(int(num_workers))
+        ]
+
+        return ParallelEnv(
+            int(num_workers),
+            create_env_fn=cls._make_env_worker,
+            shared_memory=shared_memory,
+            mp_start_method=mp_start_method,
+            create_env_kwargs=create_env_kwargs,
+        )
+
+    @staticmethod
+    def _make_env_worker(
+        env_cls: type["P3DEnv"],
+        renderer_cls: type["P3DRenderer"],
+        config: "P3DConfig",
+        worker_index: int,
+        num_workers: int,
+    ) -> "P3DEnv":
+        """
+        Spawn-safe worker factory to build a P3DEnv subclass instance with its renderer.
+        """
+        cfg = P3DConfig.from_config(config, worker_index=worker_index, num_workers=num_workers)
+        cfg.worker_index = worker_index
+        try:
+            if getattr(cfg, "seed", None) is not None:
+                cfg.seed = int(cfg.seed) + int(worker_index)
+        except Exception:
+            # If seed is not present or not an int, ignore
+            pass
+
+        renderer = renderer_cls(cfg)
+        env = env_cls(renderer=renderer, cfg=cfg)
+        return env
 
     # # ---- Rendering helpers ----
     # def _num_instances(self) -> int:

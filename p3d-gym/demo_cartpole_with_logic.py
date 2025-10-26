@@ -1,5 +1,4 @@
 import time
-import os
 
 import math
 from dataclasses import dataclass
@@ -7,8 +6,6 @@ import numpy as np
 import torch
 from tensordict import TensorDict
 from torchrl.envs import EnvBase
-from torchrl.envs import ParallelEnv, EnvCreator
-from torchrl.data.tensor_specs import Composite, Unbounded, Categorical
 
 try:
     from .renderer.renderer import P3DRenderer
@@ -317,19 +314,6 @@ class CartPoleEnv(P3DEnv):
 
         return TensorDict(out_fields, batch_size=self.batch_size)
 
-
-seed = 0
-# Spawn-safe env creator for ParallelEnv
-def _make_cartpole_env_worker(config: CartPoleConfig, worker_index: int) -> "CartPoleEnv":
-    # num_scenes_per_worker = int(os.environ.get("P3D_NUM_SCENES_PER_WORKER", "1"))
-    config = P3DConfig.from_config(config, worker_index=worker_index)
-    config.worker_index = worker_index
-    config.seed += worker_index
-
-    print(config)
-
-    return CartPoleEnv(renderer=CartPoleRenderer(config), cfg=config)
-
 # Quick test
 if __name__ == "__main__":
     use_parallel_envs = True
@@ -338,18 +322,14 @@ if __name__ == "__main__":
     tile_resolution = (64, 64)
     config = CartPoleConfig(num_scenes=num_scenes, tile_resolution=tile_resolution)
     if use_parallel_envs:
-        import multiprocessing as mp
-        try:
-            mp.set_start_method("spawn", force=True)
-        except RuntimeError:
-            pass
         num_workers = int(num_parallel_envs)
-        os.environ["P3D_NUM_SCENES_PER_WORKER"] = str(int(num_scenes))
-        # Single factory; worker index inferred in child and set via os.environ
-        env = ParallelEnv(num_workers, create_env_fn=_make_cartpole_env_worker,
-        shared_memory=True,
-        mp_start_method="spawn",
-        create_env_kwargs=[{"worker_index": i, "config": config} for i in range(num_workers)])
+        env = CartPoleEnv.make_parallel_env(
+            config=config,
+            renderer_cls=CartPoleRenderer,
+            num_workers=num_workers,
+            mp_start_method="spawn",
+            shared_memory=True,
+        )
 
         td = env.reset()
         total = 0.0
