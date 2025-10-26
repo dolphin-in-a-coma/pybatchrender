@@ -149,9 +149,8 @@ class P3DConfig:
 
     @classmethod
     def from_config(cls: type[T], cfg: T | dict | None = None, **overrides) -> T:
-        if cfg is not None and overrides:
-            raise ValueError("cfg and additional keyword arguments cannot be used together")
-
+        # if cfg is not None and overrides:
+        #     raise ValueError("cfg and additional keyword arguments cannot be used together")
 
         if isinstance(cfg, cls):
             cfg_dict = asdict(cfg)

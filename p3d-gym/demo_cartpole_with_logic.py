@@ -43,12 +43,26 @@ class CartPoleConfig(P3DConfig):
     length: float = 0.5          # half-pole length
     force_mag: float = 10.0
     tau: float = 0.02            # s between updates
-    theta_threshold_deg: float = 12.0
+    theta_threshold_deg: float = 90.0
     x_threshold: float = 2.4
 
     seed: int = 0
     render: bool = True
+    # Initial state ranges
+    init_x_range: tuple[float, float] = (-2, 2)
+    # Theta ranges are specified in DEGREES in config; converted to radians in env init
+    init_theta_range_deg: tuple[float, float] = (-30, 30)
+    init_x_dot_range: tuple[float, float] = (-1, 1)
+    # Theta-dot range specified in DEGREES/SEC in config; converted to radians/sec in env init
+    init_theta_dot_range_deg: tuple[float, float] = (-15, 15)
+    # Saving controls
+    save_every_steps: int = 50  # < 0 disables saving; 0 saves every step; >0 saves every N steps
+    save_examples_num: int = 16
+    save_out_dir: str | None = None
 
+    # Parallel env controls
+    worker_index: int = 0
+    num_workers: int = 1
 
 class CartPoleRenderer(P3DRenderer):
     def __init__(self, cfg: P3DConfig | dict | None = None):
@@ -132,9 +146,11 @@ class CartPoleEnv(P3DEnv):
                 cfg: CartPoleConfig | dict | None = None,
                 **cfg_overrides,
                 ):
-        if cfg is None:
-            cfg = CartPoleConfig()
-        cfg = CartPoleConfig.from_config(cfg, **cfg_overrides)
+
+        # if cfg is None:
+        #     cfg = CartPoleConfig()
+        # cfg = CartPoleConfig.from_config(cfg, **cfg_overrides)
+
         super().__init__(renderer=renderer, cfg=cfg, device=torch.device(cfg.device), batch_size=torch.Size([cfg.num_scenes]))
 
         # Physics params
@@ -150,8 +166,22 @@ class CartPoleEnv(P3DEnv):
         self.x_threshold = float(cfg.x_threshold if cfg is not None else 2.4)
         self.max_steps = int(cfg.max_steps if cfg is not None else 500)
         self.auto_reset = bool(cfg.auto_reset if cfg is not None else True)
+
         self.seed = int(cfg.seed if cfg is not None else 0)
+        # Keep render spec consistent across workers; gate heavy rendering at runtime
         self.render = bool(cfg.render if cfg is not None else True)
+
+        # Convert degree-based config ranges to radians for internal use
+        th0_lo, th0_hi = float(cfg.init_theta_range_deg[0]), float(cfg.init_theta_range_deg[1])
+        thd_lo, thd_hi = float(cfg.init_theta_dot_range_deg[0]), float(cfg.init_theta_dot_range_deg[1])
+        self._init_theta_range_rad = (
+            math.radians(min(th0_lo, th0_hi)),
+            math.radians(max(th0_lo, th0_hi)),
+        )
+        self._init_theta_dot_range_rad = (
+            math.radians(min(thd_lo, thd_hi)),
+            math.radians(max(thd_lo, thd_hi)),
+        )
 
         # Specs via base helper
         self.set_default_specs(
@@ -164,6 +194,13 @@ class CartPoleEnv(P3DEnv):
 
         if self.seed is not None:
             self.set_seed(self.seed)
+
+    def _sample_initial_state(self, batch_shape: torch.Size) -> torch.Tensor:
+        x = torch.empty(*batch_shape, 1, dtype=torch.float32, device=self.device).uniform_(*self.cfg.init_x_range)
+        x_dot = torch.empty(*batch_shape, 1, dtype=torch.float32, device=self.device).uniform_(*self.cfg.init_x_dot_range)
+        theta = torch.empty(*batch_shape, 1, dtype=torch.float32, device=self.device).uniform_(*self._init_theta_range_rad)
+        theta_dot = torch.empty(*batch_shape, 1, dtype=torch.float32, device=self.device).uniform_(*self._init_theta_dot_range_rad)
+        return torch.cat([x, x_dot, theta, theta_dot], dim=-1)
 
     def _dynamics(self, obs: torch.Tensor, action: torch.Tensor) -> torch.Tensor:
         x, x_dot, theta, theta_dot = obs.unbind(-1)
@@ -198,25 +235,27 @@ class CartPoleEnv(P3DEnv):
 
     def _reset(self, tensordict: TensorDict | None = None) -> TensorDict:
         bs = self.batch_size if self.batch_size != torch.Size([]) else torch.Size([1])
-        state = torch.empty(*bs, 4, dtype=torch.float32, device=self.device).uniform_(-0.05, 0.05)
+        state = self._sample_initial_state(bs)
         step_count = torch.zeros(*bs, dtype=torch.long, device=self.device)
         done = torch.zeros(*bs, 1, dtype=torch.bool, device=self.device)
         td_fields = {
-            "observation": state,
-            "step_count": step_count,
-            "done": done,
+            "observation": state, # .to("cpu").contiguous(),
+            "step_count": step_count, # .to("cpu").contiguous(),
+            "done": done, # .to("cpu").contiguous(),
         }
         if self.render:
             try:
                 pixels = self.render_pixels(state)
-                td_fields["pixels"] = pixels
+                td_fields["pixels"] = pixels #.to("cpu").contiguous().clone()
             except Exception:
                 pass
-        return TensorDict(td_fields, batch_size=self.batch_size, device=self.device)
+        return TensorDict(td_fields, batch_size=self.batch_size)
 
     @torch.no_grad()
     def _step(self, tensordict: TensorDict) -> TensorDict:
         obs = tensordict.get("observation", None)
+
+        # print(obs[:2][:5])
         if obs is None:
             td0 = self._reset()
             obs = td0["observation"]
@@ -229,6 +268,7 @@ class CartPoleEnv(P3DEnv):
 
         action = tensordict["action"].to(self.device)
         next_obs_raw = self._dynamics(obs, action)
+        # print(next_obs_raw[:2][:5], 'NEXT_OBS_RAW')
         done = self._termination(next_obs_raw, step_count)
         reward = self._reward(next_obs_raw, done)
 
@@ -236,42 +276,65 @@ class CartPoleEnv(P3DEnv):
         if self.render:
             try:
                 pixels = self.render_pixels(next_obs_raw)
+                # print(pixels)
             except Exception:
                 pixels = None
 
         if self.auto_reset:
-            reset_state = torch.empty_like(next_obs_raw).uniform_(-0.05, 0.05)
+            reset_state = self._sample_initial_state(next_obs_raw.shape[:-1])
             next_obs = torch.where(done, reset_state, next_obs_raw)
             next_step_count = torch.where(done.squeeze(-1), torch.zeros_like(step_count), step_count + 1)
         else:
             next_obs = next_obs_raw
             next_step_count = step_count + 1
 
-        next_fields = {
+        # # Move core fields to CPU for safe IPC
+        # next_obs = next_obs.to("cpu").contiguous()
+        # next_step_count = next_step_count.to("cpu").contiguous()
+        # reward = reward.to("cpu").contiguous()
+        # done = done.to("cpu").contiguous()
+        # if pixels is not None:
+        #     try:
+        #         pixels = pixels.to("cpu").contiguous().clone()
+        #     except Exception:
+        #         pass
+
+        # EnvBase.step expects _step to return the "next" data at root.
+        # ParallelEnv will copy these keys into the shared "next" buffer.
+        out_fields = {
             "observation": next_obs,
             "reward": reward,
             "done": done,
             "step_count": next_step_count,
         }
+
         if pixels is not None:
-            next_fields["pixels"] = pixels
+            out_fields["pixels"] = pixels #.clone()
 
-        return TensorDict({
-            "next": next_fields,
-            "reward": reward,
-            "done": done,
-        }, batch_size=self.batch_size, device=self.device)
+        # # Debug prints
+        # print(next_obs[:2][:5], 'NEXT_OBS HERE')
+        # print(reward.sum().item(), 'REWARD')
 
+        return TensorDict(out_fields, batch_size=self.batch_size)
+
+
+seed = 0
 # Spawn-safe env creator for ParallelEnv
-def _make_cartpole_env_worker(config: CartPoleConfig) -> "CartPoleEnv":
+def _make_cartpole_env_worker(config: CartPoleConfig, worker_index: int) -> "CartPoleEnv":
     # num_scenes_per_worker = int(os.environ.get("P3D_NUM_SCENES_PER_WORKER", "1"))
+    config = P3DConfig.from_config(config, worker_index=worker_index)
+    config.worker_index = worker_index
+    config.seed += worker_index
+
+    print(config)
+
     return CartPoleEnv(renderer=CartPoleRenderer(config), cfg=config)
 
 # Quick test
 if __name__ == "__main__":
-    use_parallel_envs = False
-    num_parallel_envs = 8
-    num_scenes = 1024*16 #256
+    use_parallel_envs = True
+    num_parallel_envs = 2
+    num_scenes = 1024 # #256
     tile_resolution = (64, 64)
     config = CartPoleConfig(num_scenes=num_scenes, tile_resolution=tile_resolution)
     if use_parallel_envs:
@@ -282,19 +345,16 @@ if __name__ == "__main__":
             pass
         num_workers = int(num_parallel_envs)
         os.environ["P3D_NUM_SCENES_PER_WORKER"] = str(int(num_scenes))
-        try:
-            env = ParallelEnv(num_workers=num_workers, create_env_fn=EnvCreator(lambda: _make_cartpole_env_worker(config)), mp_start_method="spawn")
-        except TypeError:
-            # Older TorchRL versions may not support mp_start_method kwarg
-            try:
-                env = ParallelEnv(num_workers=num_workers, create_env_fn=EnvCreator(lambda: _make_cartpole_env_worker(config)))
-            except Exception:
-                # Fallback: pass the function directly if EnvCreator location differs
-                env = ParallelEnv(num_workers=num_workers, create_env_fn=lambda: _make_cartpole_env_worker(config))
+        # Single factory; worker index inferred in child and set via os.environ
+        env = ParallelEnv(num_workers, create_env_fn=_make_cartpole_env_worker,
+        shared_memory=True,
+        mp_start_method="spawn",
+        create_env_kwargs=[{"worker_index": i, "config": config} for i in range(num_workers)])
+
         td = env.reset()
         total = 0.0
         tm_start = time.time()
-        steps = 100
+        steps = 200
         bs = env.batch_size if env.batch_size != torch.Size([]) else torch.Size([1])
         num_envs = 1
 
@@ -306,11 +366,42 @@ if __name__ == "__main__":
 
         for t in range(steps):
             a = env.action_spec.rand()
+            td = td.clone()
             td["action"] = a
             td = env.step(td)
             total += td["next", "reward"].sum().item()
+            # print(td['next', 'reward'].sum().item(), 'CURRENT_REWARD')
+           #  print('td', td)
+            # print(td['observation'][:2][:5], 'CURRENT')
             td = td["next"]
-        
+            # print(td['observation'][:2][:5], 'NEXT')
+            # break
+
+            # td = td["next"]
+            # print(td['pixels'])
+            # print(td['next']['pixels'])
+
+            step_interval = int(getattr(config, 'save_every_steps', -1))
+            if step_interval >= 0:
+                do_save = (step_interval == 0) or (t % step_interval == 0)
+                if do_save:
+                    # print(td['observation'][:2][:5])
+                    try:
+                        pixels = td.get("pixels", None)
+                        env.save_batch_examples(
+                            indices=(
+                                list(range(5)) + list(range(num_scenes-3,num_scenes+3)) +
+                                list(range(num_scenes*num_parallel_envs-5,num_scenes*num_parallel_envs))
+                                ),
+                            pixels=pixels,
+                            num=int(getattr(config, 'save_examples_num', 16)),
+                            out_dir=getattr(config, 'save_out_dir', None),
+                            filename_prefix="batch_example",
+
+                        )
+                    except Exception:
+                        pass
+
         tm_end = time.time()
         fps = total_frames / (tm_end - tm_start)
         print(f"Time taken (ParallelEnv, workers={num_workers}): {tm_end - tm_start} seconds")
@@ -330,6 +421,22 @@ if __name__ == "__main__":
             td = env.step(td)
             total += td["next", "reward"].sum().item()
             td = td["next"]
+            # Periodic saving logic
+            step_interval = int(getattr(config, 'save_every_steps', -1))
+            if step_interval >= 0:
+                do_save = (step_interval == 0) or (t % step_interval == 0)
+                if do_save:
+                    try:
+                        pixels = td.get("pixels", None)
+                        env.save_batch_examples(
+                            indices=list(range(16)),
+                            pixels=pixels,
+                            num=int(getattr(config, 'save_examples_num', 16)),
+                            out_dir=getattr(config, 'save_out_dir', None),
+                            filename_prefix="batch_example",
+                        )
+                    except Exception:
+                        pass
             # print(td)
             # break
         tm_end = time.time()

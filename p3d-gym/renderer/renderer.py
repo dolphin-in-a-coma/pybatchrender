@@ -254,11 +254,13 @@ class P3DRenderer(ShowBase):
 
     def _init_frame_grabber_once(self, task):
 
-        # self._warmup()
+
                     
-        # Optional GPU grabber (CuPy + CUDA)
+        # #Optional GPU grabber (CuPy + CUDA)
         # if getattr(self, 'offscreen_tex', None) is None:
         #     self._setup_offscreen_rt()
+
+        # self._warmup()
 
         print("GPU_AVAILABLE:", GPU_AVAILABLE)
         print("cuda_gl_interop:", self.cfg.cuda_gl_interop)
@@ -285,19 +287,28 @@ class P3DRenderer(ShowBase):
     def grab_pixels(self):
         # Read pixels from the offscreen texture; rendering happens via taskMgr
         # Prefer GPU interop if available (returns torch CUDA tensor when obs_on_gpu=True)
-        # if getattr(self, '_frame_grabber', None) is None:
-        #     self.taskMgr.doMethodLater(0, self._init_frame_grabber_once, 'init_frame_grabber_once')
-        #     return torch.zeros((int(self.cfg.window_resolution[1]), int(self.cfg.window_resolution[0]), self.cfg.num_channels), dtype=torch.uint8, device=self.cfg.device)
+        if getattr(self, '_frame_grabber', None) is None:
+            # Try a synchronous CPU fallback to avoid zero frames on first grabs
+            try:
+                if not hasattr(self, 'offscreen_tex') or self.offscreen_tex is None:
+                    self._setup_offscreen_rt()
+                self._frame_grabber = CPUFrameGrabber(self, getattr(self, 'offscreen_tex', None))
+                try:
+                    self.taskMgr.step()
+                except Exception:
+                    pass
+            except Exception:
+                self.taskMgr.doMethodLater(0, self._init_frame_grabber_once, 'init_frame_grabber_once')
+                return torch.zeros((int(self.cfg.window_resolution[1]), int(self.cfg.window_resolution[0]), self.cfg.num_channels), dtype=torch.uint8)
+
         try:
-            frame = self._frame_grabber.grab()  # torch.uint8 [H,W,4] on CUDA
+            frame = self._frame_grabber.grab()  # torch.uint8 [H,W,CH]
             frame = frame[..., :self.cfg.num_channels]
             return frame
-        except Exception as e:
-            if getattr(self, '_frame_grabber', None) is None:
-                self.taskMgr.doMethodLater(0, self._init_frame_grabber_once, 'init_frame_grabber_once')
-                return torch.zeros((int(self.cfg.window_resolution[1]), int(self.cfg.window_resolution[0]), self.cfg.num_channels), dtype=torch.uint8, device=self.cfg.device)
-            raise e # It should never happen
-            # return torch.zeros((int(self.cfg.window_resolution[1]), int(self.cfg.window_resolution[0]), self.cfg.num_channels), dtype=torch.uint8, device=self.cfg.device)
+        except Exception:
+            # Schedule async init and return zeros this frame
+            self.taskMgr.doMethodLater(0, self._init_frame_grabber_once, 'init_frame_grabber_once')
+            return torch.zeros((int(self.cfg.window_resolution[1]), int(self.cfg.window_resolution[0]), self.cfg.num_channels), dtype=torch.uint8)
     
     def _rearrange_img(self, img: torch.Tensor | np.ndarray) -> torch.Tensor:
         if isinstance(img, np.ndarray):
@@ -335,7 +346,10 @@ class P3DRenderer(ShowBase):
             self.taskMgr.step()
         if return_pixels:
             img = self.grab_pixels()
-            return self._rearrange_img(img)
+            # print(img.shape)
+            img_processed = self._rearrange_img(img)
+            # print(img_processed.shape)
+            return img_processed
 
 
     def __call__(self, *args, return_pixels: bool = True, **kwargs):
