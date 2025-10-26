@@ -1,4 +1,5 @@
 import time
+import os
 
 import math
 from dataclasses import dataclass
@@ -6,15 +7,18 @@ import numpy as np
 import torch
 from tensordict import TensorDict
 from torchrl.envs import EnvBase
+from torchrl.envs import ParallelEnv, EnvCreator
 from torchrl.data.tensor_specs import Composite, Unbounded, Categorical
 
 try:
     from .renderer.renderer import P3DRenderer
     from .config import P3DConfig
+    from .env import P3DEnv
 except ImportError:
     # Fallback when run as a script (no package parent)
     from renderer.renderer import P3DRenderer
     from config import P3DConfig
+    from env import P3DEnv
 
 
 @dataclass
@@ -41,6 +45,9 @@ class CartPoleConfig(P3DConfig):
     tau: float = 0.02            # s between updates
     theta_threshold_deg: float = 12.0
     x_threshold: float = 2.4
+
+    seed: int = 0
+    render: bool = True
 
 
 class CartPoleRenderer(P3DRenderer):
@@ -86,6 +93,8 @@ class CartPoleRenderer(P3DRenderer):
         self.pole_theta = np.zeros_like(self.cart_x_pos)
 
         self.add_camera()
+        self._p3d_cam.set_positions(np.array([5, 5, 2], dtype=np.float32))
+        self._p3d_cam.look_at(np.array([0, 0, 0], dtype=np.float32))
         self.add_light()
         self.setup_environment()
 
@@ -117,33 +126,16 @@ class CartPoleRenderer(P3DRenderer):
         self.pole_hpr[:, :, 1:2] = self.pole_theta
         self.pole.set_hprs(self.pole_hpr)
 
-
-class CartPoleEnv(EnvBase):
-    def __init__(self, device: str | torch.device = "cpu", batch_size: torch.Size = torch.Size([128]), seed: int | None = None, render: bool = False, p3d_cfg: P3DConfig | dict | None = None):
-        super().__init__(device=torch.device(device), batch_size=batch_size)
-        self._renderer: CartPoleRenderer | None = None
-        cfg = None
-        if render:
-            base_cfg = p3d_cfg if p3d_cfg is not None else {}
-            if isinstance(base_cfg, dict):
-                cfg = CartPoleConfig.from_config(base_cfg)
-            elif isinstance(base_cfg, P3DConfig):
-                cfg = CartPoleConfig.from_config(base_cfg.__dict__)
-            else:
-                cfg = CartPoleConfig()
-            # tiles/num_scenes from batch
-            N = 1
-            for d in (batch_size if batch_size != torch.Size([]) else torch.Size([1])):
-                N *= int(d)
-            cols = int(math.ceil(math.sqrt(N)))
-            rows = int(math.ceil(N / cols))
-            cfg.tiles = (cols, rows)
-            cfg.num_scenes = N
-            if cfg.tile_resolution is None and cfg.window_resolution is None:
-                cfg.tile_resolution = (64, 64)
-            cfg.offscreen = True
-            cfg.report_fps = False
-            self._renderer = CartPoleRenderer(cfg)
+class CartPoleEnv(P3DEnv):
+    def __init__(self, 
+                renderer: CartPoleRenderer,
+                cfg: CartPoleConfig | dict | None = None,
+                **cfg_overrides,
+                ):
+        if cfg is None:
+            cfg = CartPoleConfig()
+        cfg = CartPoleConfig.from_config(cfg, **cfg_overrides)
+        super().__init__(renderer=renderer, cfg=cfg, device=torch.device(cfg.device), batch_size=torch.Size([cfg.num_scenes]))
 
         # Physics params
         self.gravity = float(cfg.gravity if cfg is not None else 9.8)
@@ -158,26 +150,21 @@ class CartPoleEnv(EnvBase):
         self.x_threshold = float(cfg.x_threshold if cfg is not None else 2.4)
         self.max_steps = int(cfg.max_steps if cfg is not None else 500)
         self.auto_reset = bool(cfg.auto_reset if cfg is not None else True)
+        self.seed = int(cfg.seed if cfg is not None else 0)
+        self.render = bool(cfg.render if cfg is not None else True)
 
-        # Specs
-        bs = self.batch_size if self.batch_size != torch.Size([]) else torch.Size([1])
-        obs_fields = {
-            "observation": Unbounded(shape=bs + torch.Size([4]), dtype=torch.float32, device=self.device),
-        }
-        if self._renderer is not None:
-            C = int(self._renderer.cfg.num_channels)
-            W = int(self._renderer.cfg.tile_resolution[0])
-            H = int(self._renderer.cfg.tile_resolution[1])
-            obs_fields["pixels"] = Unbounded(shape=bs + torch.Size([C, H, W]), dtype=torch.uint8, device=self.device)
-        self.observation_spec = Composite(**obs_fields, shape=bs)
-        self.action_spec = Categorical(n=2, shape=bs, dtype=torch.long, device=self.device)
-        self.reward_spec = Unbounded(shape=bs + torch.Size([1]), dtype=torch.float32, device=self.device)
-        self.done_spec = Unbounded(shape=bs + torch.Size([1]), dtype=torch.bool, device=self.device)
+        # Specs via base helper
+        self.set_default_specs(
+            direct_obs_dim=4,
+            actions=2,
+            with_pixels=self.render,
+            pixels_only=False,
+            discrete_actions=True,
+        )
 
-        if seed is not None:
-            self.set_seed(seed)
+        if self.seed is not None:
+            self.set_seed(self.seed)
 
-    # ---- Dynamics / termination / reward hooks ----
     def _dynamics(self, obs: torch.Tensor, action: torch.Tensor) -> torch.Tensor:
         x, x_dot, theta, theta_dot = obs.unbind(-1)
         force = torch.where(action == 1, self.force_mag, -self.force_mag).to(torch.float32)
@@ -206,7 +193,6 @@ class CartPoleEnv(EnvBase):
     def _reward(self, obs: torch.Tensor, done: torch.Tensor) -> torch.Tensor:
         return torch.ones_like(done, dtype=torch.float32, device=self.device)
 
-    # ---- TorchRL API ----
     def _set_seed(self, seed: int) -> None:
         torch.manual_seed(int(seed))
 
@@ -220,9 +206,9 @@ class CartPoleEnv(EnvBase):
             "step_count": step_count,
             "done": done,
         }
-        if self._renderer is not None:
+        if self.render:
             try:
-                pixels = self._renderer.step(state)
+                pixels = self.render_pixels(state)
                 td_fields["pixels"] = pixels
             except Exception:
                 pass
@@ -247,9 +233,9 @@ class CartPoleEnv(EnvBase):
         reward = self._reward(next_obs_raw, done)
 
         pixels = None
-        if self._renderer is not None:
+        if self.render:
             try:
-                pixels = self._renderer.step(next_obs_raw)
+                pixels = self.render_pixels(next_obs_raw)
             except Exception:
                 pixels = None
 
@@ -276,32 +262,77 @@ class CartPoleEnv(EnvBase):
             "done": done,
         }, batch_size=self.batch_size, device=self.device)
 
+# Spawn-safe env creator for ParallelEnv
+def _make_cartpole_env_worker(config: CartPoleConfig) -> "CartPoleEnv":
+    # num_scenes_per_worker = int(os.environ.get("P3D_NUM_SCENES_PER_WORKER", "1"))
+    return CartPoleEnv(renderer=CartPoleRenderer(config), cfg=config)
+
 # Quick test
 if __name__ == "__main__":
-    num_scenes = 1024*8 #256
+    use_parallel_envs = False
+    num_parallel_envs = 8
+    num_scenes = 1024*16 #256
     tile_resolution = (64, 64)
     config = CartPoleConfig(num_scenes=num_scenes, tile_resolution=tile_resolution)
-    # renderer = CartPoleRenderer(config)
-    # renderer.setup_environment()
-    env = CartPoleEnv(device="cpu",
-    batch_size=torch.Size([num_scenes]),
-    p3d_cfg=config,
-    render=True)
-    td = env.reset()
-    total = 0.0
-    tm_start = time.time()
-    steps = 1000
-    total_frames = steps * num_scenes
+    if use_parallel_envs:
+        import multiprocessing as mp
+        try:
+            mp.set_start_method("spawn", force=True)
+        except RuntimeError:
+            pass
+        num_workers = int(num_parallel_envs)
+        os.environ["P3D_NUM_SCENES_PER_WORKER"] = str(int(num_scenes))
+        try:
+            env = ParallelEnv(num_workers=num_workers, create_env_fn=EnvCreator(lambda: _make_cartpole_env_worker(config)), mp_start_method="spawn")
+        except TypeError:
+            # Older TorchRL versions may not support mp_start_method kwarg
+            try:
+                env = ParallelEnv(num_workers=num_workers, create_env_fn=EnvCreator(lambda: _make_cartpole_env_worker(config)))
+            except Exception:
+                # Fallback: pass the function directly if EnvCreator location differs
+                env = ParallelEnv(num_workers=num_workers, create_env_fn=lambda: _make_cartpole_env_worker(config))
+        td = env.reset()
+        total = 0.0
+        tm_start = time.time()
+        steps = 100
+        bs = env.batch_size if env.batch_size != torch.Size([]) else torch.Size([1])
+        num_envs = 1
 
-    for t in range(steps):
-        a = env.action_spec.rand()
-        td["action"] = a
-        td = env.step(td)
-        total += td["next", "reward"].sum().item()
-        td = td["next"]
-        # print(td)
-        # break
-    tm_end = time.time()
-    fps = total_frames / (tm_end - tm_start)
-    print(f"Time taken: {tm_end - tm_start} seconds")
-    print(f"FPS: {fps}")
+        print(f"batch size: {bs}")
+        for d in bs:
+            num_envs *= int(d)
+        total_frames = steps * num_envs
+        print(f"total frames: {total_frames}")
+
+        for t in range(steps):
+            a = env.action_spec.rand()
+            td["action"] = a
+            td = env.step(td)
+            total += td["next", "reward"].sum().item()
+            td = td["next"]
+        
+        tm_end = time.time()
+        fps = total_frames / (tm_end - tm_start)
+        print(f"Time taken (ParallelEnv, workers={num_workers}): {tm_end - tm_start} seconds")
+        print(f"FPS: {fps}")
+        env.close()
+    else:
+        env = CartPoleEnv(renderer=CartPoleRenderer(config), cfg=config)
+        td = env.reset()
+        total = 0.0
+        tm_start = time.time()
+        steps = 500
+        total_frames = steps * num_scenes
+
+        for t in range(steps):
+            a = env.action_spec.rand()
+            td["action"] = a
+            td = env.step(td)
+            total += td["next", "reward"].sum().item()
+            td = td["next"]
+            # print(td)
+            # break
+        tm_end = time.time()
+        fps = total_frames / (tm_end - tm_start)
+        print(f"Time taken (single-process): {tm_end - tm_start} seconds")
+        print(f"FPS: {fps}")

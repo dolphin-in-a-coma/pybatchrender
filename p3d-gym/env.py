@@ -6,8 +6,13 @@ from torchrl.envs import EnvBase
 from torchrl.data.tensor_specs import Composite, Unbounded, Categorical
 
 # Optional renderer / config (kept optional to avoid hard deps when not rendering)
-from .config import P3DConfig
-from .renderer.renderer import P3DRenderer
+try:
+    from .config import P3DConfig
+    from .renderer.renderer import P3DRenderer
+except ImportError:
+    # Fallback when run as a script (no package parent)
+    from config import P3DConfig
+    from renderer.renderer import P3DRenderer
 
 class P3DEnv(EnvBase, ABC):
 
@@ -80,12 +85,13 @@ class P3DEnv(EnvBase, ABC):
         pass
 
     @abstractmethod
-    def _reset(self) -> TensorDict:
+    def _reset(self, tensordict: TensorDict | None = None) -> TensorDict:
         pass
 
-    # @abstractmethod
-    # def _render(self) -> torch.Tensor:
-    #     pass
+    def render_pixels(self, obs: torch.Tensor | None = None) -> torch.Tensor:
+        if self._renderer is None:
+            raise RuntimeError("Renderer is not initialized. Construct env with a renderer and pass it to P3DEnv.")
+        return self._renderer.step(obs)
 
     # # ---- Rendering helpers ----
     # def _num_instances(self) -> int:
