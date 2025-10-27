@@ -1,0 +1,71 @@
+[build-system]
+requires = [
+  "setuptools>=68",
+  "wheel"
+]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "p3d-gym"
+version = "0.1.0"
+description = "Convenience utilities to build fast-rendered 3D environments with Panda3D"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { file = "LICENSE" }
+authors = [
+  { name = "Evgenii Rudakov" }
+]
+keywords = ["panda3d", "graphics", "rendering", "rl", "torchrl", "gym"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Developers",
+  "License :: OSI Approved :: MIT License",
+  "Programming Language :: Python",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3 :: Only",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Operating System :: OS Independent",
+  "Topic :: Multimedia :: Graphics",
+  "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+dependencies = [
+  "panda3d>=1.10.13",
+  "torch>=2.1",
+  "tensordict>=0.5",
+  "torchrl>=0.5",
+]
+
+[project.optional-dependencies]
+images = [
+  "Pillow>=10",
+  "imageio>=2.31",
+  "matplotlib>=3.8",
+]
+cuda = [
+  # CUDA runtime bindings
+  "cuda-python>=12.0,<13; platform_system != 'Darwin'",
+  # CuPy for DLPack zero-copy and device arrays (choose wheel for your CUDA)
+  "cupy-cuda12x>=12.0; platform_system != 'Darwin'",
+  # OpenGL constant used for interop
+  "PyOpenGL>=3.1",
+]
+
+[project.urls]
+Homepage = "https://github.com/evgeruda/p3d-gym"
+Repository = "https://github.com/evgeruda/p3d-gym"
+
+[tool.setuptools]
+include-package-data = true
+
+[tool.setuptools.packages.find]
+include = ["p3d_gym", "p3d_gym.*"]
+
+[tool.setuptools.package-data]
+p3d_gym = [
+  "shaders/*.frag",
+  "shaders/*.vert",
+]
+
+

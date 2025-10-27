@@ -6,7 +6,7 @@ from dataclasses import dataclass, asdict
 
 import math
 from typing import Iterable, TypeVar
-from torchrl.data.tensor_specs import TensorSpec
+# NOTE: Avoid importing TorchRL here to keep P3DConfig import lightweight
 
 import torch
 

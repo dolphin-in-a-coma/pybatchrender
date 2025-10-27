@@ -1,0 +1,6 @@
+include README.md
+include LICENSE
+
+recursive-include p3d_gym/shaders *.frag *.vert
+
+
