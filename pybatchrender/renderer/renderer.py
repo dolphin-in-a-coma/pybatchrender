@@ -109,8 +109,20 @@ class PBRRenderer(ShowBase):
                         name=name)
         return node
 
-    def add_camera(self) -> PBRCam:
-        self._pbr_cam = PBRCam(self, num_scenes=self.cfg.num_scenes, cols=self.cfg.tiles[0], rows=self.cfg.tiles[1])
+    def add_camera(self,
+                   fov_y_deg: float = 55.0,
+                   z_near: float = 0.05,
+                   z_far: float = 100.0,
+                   fixed_projection: bool = True,
+    ) -> PBRCam:
+        self._pbr_cam = PBRCam(self,
+        num_scenes=self.cfg.num_scenes,
+        cols=self.cfg.tiles[0],
+        rows=self.cfg.tiles[1],
+        fov_y_deg=fov_y_deg,
+        z_near=z_near,
+        z_far=z_far,
+        fixed_projection=fixed_projection)
         return self._pbr_cam
 
     # TODO: is this still of any use?
