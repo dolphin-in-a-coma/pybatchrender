@@ -5,9 +5,10 @@ from typing import Literal
 import torch
 
 from direct.showbase.ShowBase import ShowBase
-from panda3d.core import loadPrcFileData, Texture, MouseButton
+from panda3d.core import loadPrcFileData, Texture, MouseButton, TextNode
 from direct.task import Task
 from direct.showbase.ShowBaseGlobal import globalClock
+from direct.gui.OnscreenText import OnscreenText
 
 
 
@@ -55,10 +56,21 @@ class PBRRenderer(ShowBase):
         self._pbr_cam: PBRCam | None = None
         self._pbr_light: PBRLight | None = None
         self.num_scenes = int(self.cfg.num_scenes)
+        self._fps_text = None
 
         # FPS reporting
         if self.cfg.report_fps:
             self._fps_last_print_time = 0.0 # TODO: move to state
+            if not self.cfg.offscreen:
+                self._fps_text = OnscreenText(
+                    text="FPS: --",
+                    parent=self.a2dTopLeft,
+                    pos=(0.05, -0.08),
+                    fg=(1, 1, 1, 1),
+                    align=TextNode.ALeft,
+                    scale=0.05,
+                    mayChange=True,
+                )
             self.taskMgr.add(self.report_fps, 'report_fps')
 
         self.disableMouse()
@@ -226,6 +238,8 @@ class PBRRenderer(ShowBase):
             self._fps_last_print_time = now
             fps = globalClock.getAverageFrameRate() * self.cfg.num_scenes
             print(f"FPS: {float(fps):.1f}")
+            if self._fps_text is not None:
+                self._fps_text.setText(f"FPS: {float(fps):.1f}")
 
         return task.cont
 

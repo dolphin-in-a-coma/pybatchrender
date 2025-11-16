@@ -18,7 +18,7 @@ class PBRNode(PBRShaderContext):
                 texture: Texture | str | bool | None = None,
                 model_pivot_relative_point: tuple[float, float, float] | None = None,
                 model_scale: float | Sequence[float] | None = None,
-                model_scale_units: Literal["relative", "absolute"] = "relative",
+                model_scale_units: Literal["relative", "absolute"] = "relative", 
                 positions: torch.Tensor | None = None,
                 hprs: torch.Tensor | None = None,
                 scales: torch.Tensor | None = None,
@@ -28,6 +28,8 @@ class PBRNode(PBRShaderContext):
                 parent: 'PBRNode | NodePath | None' = None, # NOTE: parent is not fully functional yet
                 name: str | None = None
                 ) -> None:
+
+        # TODO: consider adding initial model_hpr 
 
         if shared_across_scenes:
             pass
