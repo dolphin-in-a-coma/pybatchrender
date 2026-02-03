@@ -37,6 +37,12 @@ class PBRLight(PBRShaderContext):
         self.ambient = tuple(float(x) for x in amb_col)
         self._set_shader_input('ambientCol', self.ambient)
 
+    def attach(self, node) -> None:
+        node._set_shader_input('lightingStrength', self.strength)
+        node._set_shader_input('dirLightDir', self.dir_dir)
+        node._set_shader_input('dirLightCol', self.dir_col)
+        node._set_shader_input('ambientCol', self.ambient)
+
     def _register_self(self) -> None:
         # Ensure light singleton on ShowBase
         self.base._pbr_light = self
