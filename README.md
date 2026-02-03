@@ -1,4 +1,6 @@
-### pybatchrender
+# PyBatchRender
+
+**NOTE: The demo scripts are currently buggy. They’ll be updated and uploaded to Colab in the coming months, along with new examples.**
 
 Utilities to build fast-rendered 3D environments with Panda3D and TorchRL. Includes a lightweight renderer, camera/light helpers, and example environments/demos.
 
