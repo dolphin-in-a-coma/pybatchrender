@@ -68,4 +68,10 @@ pybatchrender = [
   "shaders/*.vert",
 ]
 
-
+# Entry points for environment plugins
+# Third-party packages can register environments by adding their own entry points:
+#   [project.entry-points."pybatchrender.envs"]
+#   my_env = "my_package.envs:register_envs"
+[project.entry-points."pybatchrender.envs"]
+# Built-in environments are registered via pybatchrender.envs._register_builtins()
+# This section is for external plugins to hook into

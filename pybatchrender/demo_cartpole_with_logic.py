@@ -385,7 +385,7 @@ if __name__ == "__main__":
         tm_end = time.time()
         fps = total_frames / (tm_end - tm_start)
         print(f"Time taken (ParallelEnv, workers={num_workers}): {tm_end - tm_start} seconds")
-        print(f"FPS: {fps}")
+        print(f"FPS: {fps:.0f}")
         env.close()
     else:
         env = CartPoleEnv(renderer=CartPoleRenderer(config), cfg=config)
@@ -422,4 +422,4 @@ if __name__ == "__main__":
         tm_end = time.time()
         fps = total_frames / (tm_end - tm_start)
         print(f"Time taken (single-process): {tm_end - tm_start} seconds")
-        print(f"FPS: {fps}")
+        print(f"FPS: {fps:.0f}")

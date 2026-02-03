@@ -49,6 +49,9 @@ except Exception:
     GPU_AVAILABLE = False  # type: ignore
     FrameGrabber = None  # type: ignore
 
+# Environment registry subpackage
+from . import envs  # noqa: F401
+
 __all__ = [
     "PBRConfig",
     "PBREnv",
@@ -61,5 +64,7 @@ __all__ = [
     "GPUFrameGrabber",
     "CPUFrameGrabber",
     "FrameGrabber",
+    # Environment registry
+    "envs",
     "__version__",
 ]

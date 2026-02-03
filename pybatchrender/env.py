@@ -207,6 +207,24 @@ class PBREnv(EnvBase, ABC):
     ) -> ParallelEnv:
         """
         Generic factory to create a TorchRL ParallelEnv for any PBREnv subclass.
+        
+        Each worker process creates its own renderer instance, avoiding the
+        Panda3D ShowBase singleton limitation.
+        
+        Args:
+            config: Configuration object for the environment
+            renderer_cls: The PBRRenderer subclass to instantiate per worker
+            num_workers: Number of parallel worker processes
+            mp_start_method: Multiprocessing start method. MUST be "spawn" for
+                Panda3D/OpenGL compatibility. "fork" and "forkserver" are NOT
+                supported and will cause crashes.
+            shared_memory: Whether to use shared memory for tensor data
+            
+        Returns:
+            TorchRL ParallelEnv instance
+            
+        Note:
+            Only "spawn" is supported because OpenGL contexts cannot be forked.
         """
         import multiprocessing as mp
 
