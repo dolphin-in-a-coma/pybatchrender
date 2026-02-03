@@ -104,7 +104,8 @@ class PBREnv(EnvBase, ABC):
         scale: int = 1,
         out_dir: str | None = './outputs',
         filename_prefix: str = "batch_example",
-    ) -> str:
+        return_bytes: bool = False,
+    ) -> str | tuple[str, bytes]:
         """
         Save a single image grid composed of N batch elements.
 
@@ -116,10 +117,18 @@ class PBREnv(EnvBase, ABC):
             scale: Scale factor for output (2 = 2x larger)
             out_dir: Output directory for the image
             filename_prefix: Prefix for the output filename
+            return_bytes: If True, also return PNG bytes for notebook display
 
         Returns:
-            The absolute path of the saved image.
+            Path to saved image, or (path, bytes) if return_bytes=True
+            
+        Example:
+            # Save and display in notebook
+            path, img_bytes = env.save_batch_examples(pixels=pixels, scale=3, return_bytes=True)
+            from IPython.display import display, Image
+            display(Image(data=img_bytes))
         """
+        import io
         import time
         import random
         from pathlib import Path
@@ -149,11 +158,19 @@ class PBREnv(EnvBase, ABC):
         fname = f"{filename_prefix}_{ts}_{rand_code}.{ext}"
         fpath = (out_path / fname).resolve()
 
-        # Save via PIL if available, fallback to imageio or matplotlib
+        # Save via PIL
         try:
             from PIL import Image
-            Image.fromarray(canvas).save(str(fpath))
-        except Exception:
+            img = Image.fromarray(canvas)
+            img.save(str(fpath))
+            
+            if return_bytes:
+                buffer = io.BytesIO()
+                img.save(buffer, format='PNG')
+                buffer.seek(0)
+                return str(fpath), buffer.getvalue()
+        except ImportError:
+            # Fallback without return_bytes support
             try:
                 import imageio.v2 as imageio
                 imageio.imwrite(str(fpath), canvas)
@@ -163,6 +180,9 @@ class PBREnv(EnvBase, ABC):
                     plt.imsave(str(fpath), canvas)
                 except Exception as e:
                     raise RuntimeError(f"Failed to save image: {e}")
+            
+            if return_bytes:
+                raise RuntimeError("return_bytes requires PIL. Install with: pip install Pillow")
 
         return str(fpath)
 
