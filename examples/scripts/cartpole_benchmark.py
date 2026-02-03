@@ -6,8 +6,11 @@ Demonstrates running the CartPole environment with benchmarking and image saving
 Uses the pybatchrender.envs registry API for plug-and-play environment creation.
 
 Usage:
-    # Single process (default)
+    # Offscreen mode (default, no window, for benchmarks)
     python cartpole_benchmark.py
+    
+    # Onscreen mode (shows window)
+    python cartpole_benchmark.py --window --num-scenes 256
     
     # Parallel workers
     python cartpole_benchmark.py --parallel --num-workers 4
@@ -69,6 +72,10 @@ def parse_args() -> argparse.Namespace:
         "--no-render", action="store_true",
         help="Disable pixel rendering (state-only mode).",
     )
+    parser.add_argument(
+        "--window", action="store_false", dest="offscreen", default=True,
+        help="Show window (onscreen mode). Default is offscreen (no window).",
+    )
     return parser.parse_args()
 
 
@@ -84,6 +91,7 @@ def run_single(args: argparse.Namespace) -> None:
         num_scenes=args.num_scenes,
         tile_resolution=tuple(args.tile_resolution),
         render=not args.no_render,
+        offscreen=args.offscreen,
         save_every_steps=args.save_every,
         save_examples_num=args.save_num,
         save_out_dir=args.save_dir,
@@ -92,6 +100,7 @@ def run_single(args: argparse.Namespace) -> None:
     print(f"Environment: CartPole-v0")
     print(f"Num scenes: {args.num_scenes}")
     print(f"Tile resolution: {args.tile_resolution}")
+    print(f"Mode: {'offscreen' if args.offscreen else 'onscreen'}")
     print(f"Rendering: {'enabled' if not args.no_render else 'disabled'}")
     print()
     
@@ -150,12 +159,14 @@ def run_parallel(args: argparse.Namespace) -> None:
     num_workers = args.num_workers
     
     # Create parallel environment using registry
+    # Note: onscreen mode with parallel workers opens multiple windows (one per worker)
     env = pbr.envs.make_parallel(
         "CartPole-v0",
         num_workers=num_workers,
         num_scenes=args.num_scenes,
         tile_resolution=tuple(args.tile_resolution),
         render=not args.no_render,
+        offscreen=args.offscreen,
     )
     
     print(f"Environment: CartPole-v0")
@@ -163,6 +174,7 @@ def run_parallel(args: argparse.Namespace) -> None:
     print(f"Num scenes per worker: {args.num_scenes}")
     print(f"Total parallel scenes: {num_workers * args.num_scenes}")
     print(f"Tile resolution: {args.tile_resolution}")
+    print(f"Mode: {'offscreen' if args.offscreen else 'onscreen'}")
     print(f"Rendering: {'enabled' if not args.no_render else 'disabled'}")
     print()
     
