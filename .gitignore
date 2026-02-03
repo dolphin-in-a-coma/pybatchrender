@@ -2,7 +2,6 @@ rest/
 article/
 .vscode/
 *.pyc
-examples/
 __pycache__/
 *.egg-info/
 build/

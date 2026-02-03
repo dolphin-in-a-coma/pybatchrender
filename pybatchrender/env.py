@@ -100,7 +100,7 @@ class PBREnv(EnvBase, ABC):
         obs: torch.Tensor | None = None,
         indices: list[int] | None = None,
         num: int = 16,
-        out_dir: str | None = None,
+        out_dir: str | None = './outputs',
         filename_prefix: str = "batch_example",
     ) -> str:
 
