@@ -2,7 +2,7 @@
 """
 CartPole Benchmark Example
 
-Demonstrates running the CartPole environment with benchmarking and image saving.
+Demonstrates running the CartPole environment with benchmarking and image/GIF saving.
 Uses the pybatchrender.envs registry API for plug-and-play environment creation.
 
 Usage:
@@ -17,6 +17,9 @@ Usage:
     
     # With image saving
     python cartpole_benchmark.py --save-every 50 --save-dir ./outputs
+    
+    # Save animated GIF
+    python cartpole_benchmark.py --gif --gif-steps 100 --gif-scale 3
     
     # High-throughput benchmark
     python cartpole_benchmark.py --num-scenes 4096 --steps 1000
@@ -65,7 +68,7 @@ def parse_args() -> argparse.Namespace:
         help="Number of examples to include in saved grids.",
     )
     parser.add_argument(
-        "--save-dir", type=str, default='./output',
+        "--save-dir", type=str, default='./outputs',
         help="Output directory for saved images.",
     )
     parser.add_argument(
@@ -76,6 +79,29 @@ def parse_args() -> argparse.Namespace:
         "--window", action="store_false", dest="offscreen", default=True,
         help="Show window (onscreen mode). Default is offscreen (no window).",
     )
+    
+    # GIF arguments
+    parser.add_argument(
+        "--gif", action="store_true",
+        help="Save an animated GIF instead of running benchmark.",
+    )
+    parser.add_argument(
+        "--gif-steps", type=int, default=100,
+        help="Number of steps to include in GIF.",
+    )
+    parser.add_argument(
+        "--gif-interval", type=int, default=2,
+        help="Capture frame every N steps for GIF.",
+    )
+    parser.add_argument(
+        "--gif-scale", type=int, default=3,
+        help="Scale factor for GIF output (3 = 3x larger).",
+    )
+    parser.add_argument(
+        "--gif-duration", type=int, default=100,
+        help="Milliseconds per frame in GIF.",
+    )
+    
     return parser.parse_args()
 
 
@@ -211,6 +237,43 @@ def run_parallel(args: argparse.Namespace) -> None:
     env.close()
 
 
+def save_gif(args: argparse.Namespace) -> None:
+    """Save an animated GIF of the environment."""
+    print("=" * 60)
+    print("CartPole - Save Animated GIF")
+    print("=" * 60)
+    
+    # Create environment
+    env = pbr.envs.make(
+        "CartPole-v0",
+        num_scenes=args.num_scenes,
+        tile_resolution=tuple(args.tile_resolution),
+        render=True,  # Must be enabled for GIF
+        offscreen=True,  # GIF doesn't need window
+    )
+    
+    print(f"Environment: CartPole-v0")
+    print(f"Num scenes: {args.num_scenes}")
+    print(f"Tile resolution: {args.tile_resolution}")
+    print(f"GIF steps: {args.gif_steps}")
+    print(f"Frame interval: {args.gif_interval}")
+    print(f"Scale: {args.gif_scale}x")
+    print()
+    
+    print("Creating GIF...")
+    path = env.save_batch_gif(
+        num_steps=args.gif_steps,
+        frame_interval=args.gif_interval,
+        num=args.save_num,
+        scale=args.gif_scale,
+        duration_ms=args.gif_duration,
+        out_dir=args.save_dir,
+        filename_prefix="cartpole_animation",
+    )
+    
+    print(f"GIF saved to: {path}")
+
+
 def main() -> None:
     # Show available environments
     print(f"Available environments: {pbr.envs.list_envs()}")
@@ -218,7 +281,9 @@ def main() -> None:
     
     args = parse_args()
     
-    if args.parallel:
+    if args.gif:
+        save_gif(args)
+    elif args.parallel:
         run_parallel(args)
     else:
         run_single(args)

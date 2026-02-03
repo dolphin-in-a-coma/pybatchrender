@@ -1,5 +1,6 @@
 from abc import ABC, abstractmethod
 import math
+import numpy as np
 import torch
 from tensordict import TensorDict
 from torchrl.envs import EnvBase, ParallelEnv
@@ -100,25 +101,31 @@ class PBREnv(EnvBase, ABC):
         obs: torch.Tensor | None = None,
         indices: list[int] | None = None,
         num: int = 16,
+        scale: int = 1,
         out_dir: str | None = './outputs',
         filename_prefix: str = "batch_example",
     ) -> str:
-
-        if self.cfg.num_workers > 1 and self.cfg.worker_index != 0:
-            return
         """
         Save a single image grid composed of N batch elements.
 
-        - If `indices` is provided, selects those; otherwise picks `num` random batch elements.
-        - If `pixels` is None, will render from `obs` via `render_pixels(obs)`.
+        Args:
+            pixels: Pre-rendered pixels [B, C, H, W] (or None to render from obs)
+            obs: Observation tensor to render (if pixels is None)
+            indices: Specific batch indices to include (or None for first `num`)
+            num: Number of examples if indices not provided
+            scale: Scale factor for output (2 = 2x larger)
+            out_dir: Output directory for the image
+            filename_prefix: Prefix for the output filename
 
-        Returns the absolute path of the saved image.
+        Returns:
+            The absolute path of the saved image.
         """
-        import math
-        import os
         import time
         import random
         from pathlib import Path
+
+        if self.cfg.num_workers > 1 and self.cfg.worker_index != 0:
+            return None
 
         # Acquire pixel batch [B, C, H, W]
         if pixels is None:
@@ -129,50 +136,14 @@ class PBREnv(EnvBase, ABC):
 
         if pixels is None:
             raise RuntimeError("No pixels available to save.")
-        
-        if pixels.dim() == 5:
-            pixels = torch.flatten(pixels, start_dim=0, end_dim=1)
 
-        if pixels.dim() != 4:
-            raise ValueError(f"Expected pixels shape [B,C,H,W], got {tuple(pixels.shape)}")
-
-        B, C, H, W = pixels.shape
-        k = min(max(1, int(num)), int(B))
-
-        # Select indices
-        if indices is not None and len(indices) > 0:
-            sel = [int(i) for i in indices if 0 <= int(i) < B]
-            if not sel:
-                raise ValueError("Provided indices are out of range.")
-            if len(sel) > k:
-                sel = sel[:k]
-        else:
-            perm = torch.randperm(B, device=pixels.device)[:k]
-            sel = perm.tolist()
-
-        imgs = pixels[sel]  # [k, C, H, W]
-
-        # Move to CPU, ensure uint8, and convert to HWC
-        imgs = imgs.detach().to("cpu")
-        if imgs.dtype != torch.uint8:
-            imgs = imgs.clamp(0, 255).to(torch.uint8)
-        imgs = imgs.permute(0, 2, 3, 1).contiguous()  # [k, H, W, C]
-
-        # Build grid canvas
-        rows = int(math.ceil(math.sqrt(k)))
-        cols = int(math.ceil(k / rows))
-        canvas = torch.zeros((rows * H, cols * W, C), dtype=torch.uint8)
-        for n in range(k):
-            r = n // cols
-            c = n % cols
-            y0, y1 = r * H, (r + 1) * H
-            x0, x1 = c * W, (c + 1) * W
-            canvas[y0:y1, x0:x1] = imgs[n]
+        # Create grid using shared helper
+        canvas = self._make_grid_frame(pixels, indices, num, scale)
 
         # Output path and filename
         ts = time.strftime("%Y%m%d_%H%M%S")
         rand_code = f"{random.randint(0, 999999):06d}"
-        ext = "png"  # using .png by default
+        ext = "png"
         out_path = Path(out_dir) if out_dir is not None else Path(".")
         out_path.mkdir(parents=True, exist_ok=True)
         fname = f"{filename_prefix}_{ts}_{rand_code}.{ext}"
@@ -180,19 +151,190 @@ class PBREnv(EnvBase, ABC):
 
         # Save via PIL if available, fallback to imageio or matplotlib
         try:
-            from PIL import Image  # type: ignore
-            Image.fromarray(canvas.numpy()).save(str(fpath))
+            from PIL import Image
+            Image.fromarray(canvas).save(str(fpath))
         except Exception:
             try:
-                import imageio.v2 as imageio  # type: ignore
-                imageio.imwrite(str(fpath), canvas.numpy())
+                import imageio.v2 as imageio
+                imageio.imwrite(str(fpath), canvas)
             except Exception:
                 try:
-                    import matplotlib.pyplot as plt  # type: ignore
-                    plt.imsave(str(fpath), canvas.numpy())
+                    import matplotlib.pyplot as plt
+                    plt.imsave(str(fpath), canvas)
                 except Exception as e:
                     raise RuntimeError(f"Failed to save image: {e}")
 
+        return str(fpath)
+
+    def _make_grid_frame(
+        self,
+        pixels: torch.Tensor,
+        indices: list[int] | None = None,
+        num: int = 16,
+        scale: int = 1,
+    ) -> "np.ndarray":
+        """
+        Create a grid image from batch pixels.
+        
+        Args:
+            pixels: Tensor of shape [B, C, H, W]
+            indices: Specific batch indices to include (or None for first `num`)
+            num: Number of examples if indices not provided
+            scale: Scale factor for output (2 = 2x larger)
+            
+        Returns:
+            numpy array of shape [grid_H, grid_W, C] as uint8
+        """
+        import numpy as np
+        
+        if pixels.dim() == 5:
+            pixels = torch.flatten(pixels, start_dim=0, end_dim=1)
+        
+        B, C, H, W = pixels.shape
+        k = min(max(1, int(num)), int(B))
+        
+        # Select indices
+        if indices is not None and len(indices) > 0:
+            sel = [int(i) for i in indices if 0 <= int(i) < B][:k]
+        else:
+            sel = list(range(k))
+        
+        imgs = pixels[sel].detach().cpu()
+        if imgs.dtype != torch.uint8:
+            imgs = imgs.clamp(0, 255).to(torch.uint8)
+        imgs = imgs.permute(0, 2, 3, 1).numpy()  # [k, H, W, C]
+        
+        # Build grid
+        rows = int(math.ceil(math.sqrt(k)))
+        cols = int(math.ceil(k / rows))
+        canvas = np.zeros((rows * H, cols * W, C), dtype=np.uint8)
+        
+        for n in range(len(sel)):
+            r, c = n // cols, n % cols
+            canvas[r*H:(r+1)*H, c*W:(c+1)*W] = imgs[n]
+        
+        # Scale up if requested
+        if scale > 1:
+            from PIL import Image
+            img = Image.fromarray(canvas)
+            new_size = (canvas.shape[1] * scale, canvas.shape[0] * scale)
+            img = img.resize(new_size, Image.NEAREST)
+            canvas = np.array(img)
+        
+        return canvas
+
+    def save_batch_gif(
+        self,
+        *,
+        num_steps: int = 100,
+        frame_interval: int = 2,
+        indices: list[int] | None = None,
+        num: int = 16,
+        scale: int = 2,
+        duration_ms: int = 100,
+        out_dir: str | None = "./outputs",
+        filename_prefix: str = "batch_animation",
+        return_bytes: bool = False,
+    ) -> str | tuple[str, bytes]:
+        """
+        Run the environment and save an animated GIF of the batch.
+        
+        Args:
+            num_steps: Number of environment steps to run
+            frame_interval: Capture a frame every N steps
+            indices: Specific batch indices to include (or None for first `num`)
+            num: Number of examples if indices not provided
+            scale: Scale factor for output (2 = 2x larger pixels)
+            duration_ms: Milliseconds per frame in GIF
+            out_dir: Output directory for the GIF
+            filename_prefix: Prefix for the output filename
+            return_bytes: If True, also return GIF bytes for notebook display
+            
+        Returns:
+            Path to saved GIF, or (path, bytes) if return_bytes=True
+            
+        Example:
+            # Save GIF and display in notebook
+            path, gif_bytes = env.save_batch_gif(num_steps=100, return_bytes=True)
+            from IPython.display import display, Image
+            display(Image(data=gif_bytes, format='gif'))
+        """
+        import io
+        import time
+        import random
+        from pathlib import Path
+        
+        if self.cfg.num_workers > 1 and self.cfg.worker_index != 0:
+            return None
+        
+        try:
+            from PIL import Image
+        except ImportError:
+            raise RuntimeError("PIL is required for GIF creation. Install with: pip install Pillow")
+        
+        frames = []
+        
+        # Reset environment
+        td = self._reset()
+        
+        # Capture initial frame
+        pixels = td.get("pixels", None)
+        if pixels is None:
+            pixels = self.render_pixels(td.get("observation", None))
+        if pixels is not None:
+            frames.append(self._make_grid_frame(pixels, indices, num, scale))
+        
+        # Run steps and capture frames
+        for step in range(1, num_steps + 1):
+            td["action"] = self.action_spec.rand()
+            td = self.step(td)
+            td = td["next"]
+            
+            if step % frame_interval == 0:
+                pixels = td.get("pixels", None)
+                if pixels is None:
+                    pixels = self.render_pixels(td.get("observation", None))
+                if pixels is not None:
+                    frames.append(self._make_grid_frame(pixels, indices, num, scale))
+        
+        if not frames:
+            raise RuntimeError("No frames captured. Ensure rendering is enabled.")
+        
+        # Convert to PIL images
+        pil_frames = [Image.fromarray(f) for f in frames]
+        
+        # Save GIF
+        ts = time.strftime("%Y%m%d_%H%M%S")
+        rand_code = f"{random.randint(0, 999999):06d}"
+        out_path = Path(out_dir) if out_dir is not None else Path(".")
+        out_path.mkdir(parents=True, exist_ok=True)
+        fname = f"{filename_prefix}_{ts}_{rand_code}.gif"
+        fpath = (out_path / fname).resolve()
+        
+        # Save to file
+        pil_frames[0].save(
+            str(fpath),
+            format='GIF',
+            save_all=True,
+            append_images=pil_frames[1:],
+            duration=duration_ms,
+            loop=0,
+        )
+        
+        if return_bytes:
+            # Also create bytes for notebook display
+            buffer = io.BytesIO()
+            pil_frames[0].save(
+                buffer,
+                format='GIF',
+                save_all=True,
+                append_images=pil_frames[1:],
+                duration=duration_ms,
+                loop=0,
+            )
+            buffer.seek(0)
+            return str(fpath), buffer.getvalue()
+        
         return str(fpath)
 
     @classmethod
