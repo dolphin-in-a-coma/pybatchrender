@@ -302,6 +302,6 @@ class SteeringRenderer(PBRRenderer):
 
         # Update camera to follow player
         if self._pbr_cam is not None:
-            cam_pos = self._player_pos.clone()
-            cam_pos[:, 0, :] += self._camera_eye_offset
+            cam_pos = self._player_pos[:, 0, :].clone()  # (num_scenes, 3)
+            cam_pos += self._camera_eye_offset
             self._pbr_cam.set_positions(cam_pos)
