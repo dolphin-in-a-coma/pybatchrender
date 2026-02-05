@@ -182,71 +182,31 @@ class SteeringRenderer(PBRRenderer):
                 self._setup_called = True
             return
 
-        # Use first batch element as reference (obstacles layout is same across batch)
-        obs_ref = obstacles[0].detach().cpu()
+        B = obstacles.shape[0]
+        N = obstacles.shape[1]
+        obs_cpu = obstacles.detach().cpu()
 
-        sphere_positions: list[tuple[float, float, float]] = []
-        sphere_colors: list[tuple[float, float, float, float]] = []
-        cone_positions: list[tuple[float, float, float]] = []
-        cone_colors: list[tuple[float, float, float, float]] = []
+        # Per-scene positions: (B, N, 3)
+        positions = torch.zeros(B, N, 3, dtype=torch.float32)
+        positions[:, :, 0] = obs_cpu[:, :, 0]  # x
+        positions[:, :, 1] = obs_cpu[:, :, 1]  # y
 
-        for obstacle in obs_ref:
-            x, y, gold_flag, is_cone_flag = obstacle.tolist()
-            position = (float(x), float(y), 0.0)
-            color = (
-                tuple(self._color_gold.tolist())
-                if gold_flag >= 0.5
-                else tuple(self._color_red.tolist())
-            )
+        # Per-scene colors: (B, N, 4) based on gold flag
+        gold_mask = obs_cpu[:, :, 2] >= 0.5
+        colors = self._color_red.unsqueeze(0).unsqueeze(0).expand(B, N, -1).clone()
+        colors[gold_mask] = self._color_gold
 
-            if is_cone_flag >= 0.5:
-                cone_positions.append(position)
-                cone_colors.append(color)
-            else:
-                sphere_positions.append(position)
-                sphere_colors.append(color)
-
-        if sphere_positions:
-            sphere_model = self._resolve_model_path(self.cfg.obstacle_sphere_model)
-            self.sphere_node = self.add_node(
-                sphere_model,
-                instances_per_scene=len(sphere_positions),
-                model_scale=self.cfg.obstacle_dimensions,
-                model_scale_units="absolute",
-                model_pivot_relative_point=self.cfg.obstacle_pivot_relative_point,
-                shared_across_scenes=True,
-            )
-            sphere_pos_tensor = torch.tensor(
-                sphere_positions, dtype=torch.float32
-            ).unsqueeze(0)
-            sphere_color_tensor = torch.tensor(
-                sphere_colors, dtype=torch.float32
-            ).unsqueeze(0)
-            self.sphere_node.set_positions(sphere_pos_tensor)
-            self.sphere_node.set_colors(sphere_color_tensor)
-
-        if cone_positions:
-            cone_model = self._resolve_model_path(self.cfg.obstacle_cone_model)
-            self.cone_node = self.add_node(
-                cone_model,
-                instances_per_scene=len(cone_positions),
-                model_scale=self.cfg.obstacle_dimensions,
-                model_scale_units="absolute",
-                model_pivot_relative_point=self.cfg.obstacle_pivot_relative_point,
-                shared_across_scenes=True,
-            )
-            cone_pos_tensor = torch.tensor(
-                cone_positions, dtype=torch.float32
-            ).unsqueeze(0)
-            cone_color_tensor = torch.tensor(
-                cone_colors, dtype=torch.float32
-            ).unsqueeze(0)
-            self.cone_node.set_positions(cone_pos_tensor)
-            self.cone_node.set_colors(cone_color_tensor)
-            # Rotate cones to stand upright
-            cone_hpr = torch.zeros((1, len(cone_positions), 3), dtype=torch.float32)
-            cone_hpr[:, :, 2] = math.pi / 2.0
-            self.cone_node.set_hprs(cone_hpr)
+        sphere_model = self._resolve_model_path(self.cfg.obstacle_sphere_model)
+        self.sphere_node = self.add_node(
+            sphere_model,
+            instances_per_scene=N,
+            model_scale=self.cfg.obstacle_dimensions,
+            model_scale_units="absolute",
+            model_pivot_relative_point=self.cfg.obstacle_pivot_relative_point,
+            shared_across_scenes=False,
+        )
+        self.sphere_node.set_positions(positions)
+        self.sphere_node.set_colors(colors)
 
         # Call setup_environment on first obstacle build
         if not self._setup_called:

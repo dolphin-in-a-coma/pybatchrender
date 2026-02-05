@@ -380,8 +380,8 @@ class SteeringEnv(PBREnv):
         # Build obstacle visuals in renderer
         self._renderer.build_obstacles(self._obstacles)
 
-        # Reset state
-        self._player_x = torch.zeros(B, device=self.device)
+        # Reset state – randomize initial lateral position
+        self._player_x = torch.empty(B, device=self.device).uniform_(self.x_min, self.x_max)
         self._player_y = torch.zeros(B, device=self.device)
         self._prev_player_x = torch.zeros(B, device=self.device)
         self._prev_player_y = torch.zeros(B, device=self.device)

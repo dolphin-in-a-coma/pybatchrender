@@ -74,8 +74,8 @@ class SteeringConfig(PBRConfig):
     obstacle_seed: int | None = None
     prob_gold: float = 0.2
     prob_cone: float = 0.5
-    distance_to_first_obstacle: float = 200.0
-    number_of_obstacles: int = 2000
+    distance_to_first_obstacle: float = 6
+    number_of_obstacles: int = 100
     obstacle_y_spacing: float = 12.0
     obstacle_x_position: List[int] = field(
         default_factory=lambda: list(range(-11, 12, 2))
