@@ -60,9 +60,15 @@ class SteeringRenderer(PBRRenderer):
 
         # Positions buffers
         self._player_pos = torch.zeros((num_scenes, 1, 3), dtype=torch.float32)
+        self._player_hpr = torch.tensor(
+            self.cfg.player_model_hpr, dtype=torch.float32
+        ).reshape(1, 1, 3).expand(num_scenes, 1, 3).clone()
         self._player_color_buf = self._color_player.unsqueeze(0).unsqueeze(0).expand(num_scenes, 1, -1).clone()
         self._left_border_pos = torch.zeros((num_scenes, 1, 3), dtype=torch.float32)
         self._right_border_pos = torch.zeros((num_scenes, 1, 3), dtype=torch.float32)
+        self._border_hpr = torch.tensor(
+            self.cfg.border_model_hpr, dtype=torch.float32
+        ).reshape(1, 1, 3).expand(num_scenes, 1, 3).clone()
 
         # Camera offset
         self._camera_eye_offset = torch.tensor(
@@ -118,6 +124,7 @@ class SteeringRenderer(PBRRenderer):
             shared_across_scenes=False,
         )
         self.player_node.set_positions(self._player_pos)
+        self.player_node.set_hprs(self._player_hpr)
         self.player_node.set_colors(self._player_color_buf)
 
     def _build_borders(self) -> None:
@@ -154,6 +161,8 @@ class SteeringRenderer(PBRRenderer):
 
         self.left_border.set_positions(self._left_border_pos)
         self.right_border.set_positions(self._right_border_pos)
+        self.left_border.set_hprs(self._border_hpr)
+        self.right_border.set_hprs(self._border_hpr)
         self.left_border.set_colors(border_color)
         self.right_border.set_colors(border_color)
 
@@ -190,6 +199,9 @@ class SteeringRenderer(PBRRenderer):
         positions = torch.zeros(B, N, 3, dtype=torch.float32)
         positions[:, :, 0] = obs_cpu[:, :, 0]  # x
         positions[:, :, 1] = obs_cpu[:, :, 1]  # y
+        hprs = torch.tensor(self.cfg.obstacle_model_hpr, dtype=torch.float32).reshape(
+            1, 1, 3
+        ).expand(B, N, 3).clone()
 
         # Per-scene colors: (B, N, 4) based on gold flag
         gold_mask = obs_cpu[:, :, 2] >= 0.5
@@ -206,6 +218,7 @@ class SteeringRenderer(PBRRenderer):
             shared_across_scenes=False,
         )
         self.sphere_node.set_positions(positions)
+        self.sphere_node.set_hprs(hprs)
         self.sphere_node.set_colors(colors)
 
         # Call setup_environment on first obstacle build

@@ -69,6 +69,9 @@ class SteeringConfig(PBRConfig):
     player_pivot_relative_point: tuple[float, float, float] = (0.5, 0.5, 0.5)
     obstacle_pivot_relative_point: tuple[float, float, float] = (0.5, 0.5, 0.5)
     rail_pivot_relative_point: tuple[float, float, float] = (0.5, 0.5, 0.0)
+    player_model_hpr: tuple[float, float, float] = (0.0, 0.0, 0.0)
+    obstacle_model_hpr: tuple[float, float, float] = (0.0, 0.0, 0.0)
+    border_model_hpr: tuple[float, float, float] = (0.0, 0.0, 0.0)
 
     # --- Obstacle generation ---
     obstacle_seed: int | None = None
