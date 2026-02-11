@@ -23,8 +23,8 @@ class PacManConfig(PBRConfig):
     render: bool = True
 
     # Map / layout configurability
-    map_width: int = 21
-    map_height: int = 21
+    map_width: int = 28
+    map_height: int = 31
     wall_matrix: list[list[int]] | None = None
     border_matrix: list[list[int]] | None = None
     pellet_matrix: list[list[int]] | None = None
