@@ -49,11 +49,12 @@ class PacManEnv(PBREnv):
         self.powered_steps = int(cfg.powered_steps)
         self.render = bool(cfg.render)
 
-        self.pacman_step_size = float(cfg.pacman_step_size)
-        self.ghost_step_size = float(cfg.ghost_step_size)
-        self.actor_radius = float(cfg.actor_radius)
-        self.collect_radius = float(cfg.collect_radius)
-        self.collision_radius = float(cfg.collision_radius)
+        self.bind_to_cells = bool(getattr(cfg, "bind_actor_positions_to_cells", False))
+        self.pacman_step_size = 1.0 if self.bind_to_cells else float(cfg.pacman_step_size)
+        self.ghost_step_size = 1.0 if self.bind_to_cells else float(cfg.ghost_step_size)
+        self.actor_radius = 0.01 if self.bind_to_cells else float(cfg.actor_radius)
+        self.collect_radius = 0.51 if self.bind_to_cells else float(cfg.collect_radius)
+        self.collision_radius = 0.51 if self.bind_to_cells else float(cfg.collision_radius)
 
         self.set_default_specs(
             direct_obs_dim=self.obs_dim,
@@ -107,6 +108,12 @@ class PacManEnv(PBREnv):
             dim=1,
         )
         return torch.cat([pac, ghosts, items], dim=1)
+
+    def _snap_to_cells(self, pos: torch.Tensor) -> torch.Tensor:
+        out = pos.clone()
+        out[:, 0] = torch.clamp(torch.round(out[:, 0]), 0, self.W - 1)
+        out[:, 1] = torch.clamp(torch.round(out[:, 1]), 0, self.H - 1)
+        return out
 
     def _is_pos_walkable(self, pos: torch.Tensor) -> torch.Tensor:
         """Approximate circular actor collision vs wall cells."""
@@ -190,8 +197,12 @@ class PacManEnv(PBREnv):
         delta[action == 4] = torch.tensor([s, 0.0], device=self.device)
 
         cand = self.pac_xy + delta
+        if self.bind_to_cells:
+            cand = self._snap_to_cells(cand)
         ok = self._is_pos_walkable(cand)
         self.pac_xy = torch.where(ok.unsqueeze(-1), cand, self.pac_xy)
+        if self.bind_to_cells:
+            self.pac_xy = self._snap_to_cells(self.pac_xy)
 
     def _move_ghosts(self):
         s = self.ghost_step_size
@@ -201,6 +212,8 @@ class PacManEnv(PBREnv):
             for g in range(self.num_ghosts):
                 cur = self.ghosts_xy[b, g].unsqueeze(0)
                 candidates = cur + moves
+                if self.bind_to_cells:
+                    candidates = self._snap_to_cells(candidates)
                 valid = self._is_pos_walkable(candidates)
                 valid_idx = torch.where(valid)[0]
                 if len(valid_idx) == 0:

@@ -44,16 +44,24 @@ class PacManRenderer(PBRRenderer):
             shared_across_scenes=True,
         )
 
+        actor_shape = str(getattr(self.cfg, "actor_shape", "circle")).lower()
+        actor_model = "models/box" if actor_shape == "square" else "models/smiley"
+        actor_pivot = (0.5, 0.5, 0.5) if actor_shape == "square" else None
+        actor_scale = (0.56, 0.56, 0.12) if actor_shape == "square" else (0.56, 0.56, 0.11)
+        ghost_scale = (0.52, 0.52, 0.11) if actor_shape == "square" else (0.52, 0.52, 0.1)
+
         self.pacman = self.add_node(
-            "models/smiley",
-            model_scale=(0.56, 0.56, 0.11),
+            actor_model,
+            model_pivot_relative_point=actor_pivot,
+            model_scale=actor_scale,
             model_scale_units="absolute",
             instances_per_scene=1,
             shared_across_scenes=False,
         )
         self.ghosts = self.add_node(
-            "models/smiley",
-            model_scale=(0.52, 0.52, 0.1),
+            actor_model,
+            model_pivot_relative_point=actor_pivot,
+            model_scale=ghost_scale,
             model_scale_units="absolute",
             instances_per_scene=max(1, self.num_ghosts),
             shared_across_scenes=False,

@@ -41,7 +41,11 @@ class PacManConfig(PBRConfig):
     pacman_start: tuple[float, float] | None = None
     ghost_starts: list[tuple[float, float]] = field(default_factory=list)
 
-    # Allow positions between cells
+    # Visual representation
+    actor_shape: str = "circle"  # "circle" | "square"
+
+    # Movement/physics
+    bind_actor_positions_to_cells: bool = False  # if True, no between-cell movement
     pacman_step_size: float = 0.35
     ghost_step_size: float = 0.30
     actor_radius: float = 0.22
