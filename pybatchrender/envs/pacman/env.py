@@ -1,4 +1,4 @@
-"""Pac-Man-like TorchRL environment."""
+"""Pac-Man-like TorchRL environment with configurable map/item matrices."""
 from __future__ import annotations
 
 import torch
@@ -6,19 +6,16 @@ from tensordict import TensorDict
 
 from ...env import PBREnv
 from .config import PacManConfig
+from .layout import build_spec
 from .renderer import PacManRenderer
 
 
 class PacManEnv(PBREnv):
     """
-    Minimal 2D Pac-Man-like environment.
+    Observation dimension is dynamic:
+      2 * (1 + num_ghosts) + num_pellets + num_power_pellets + num_cherries
 
-    Actions:
-      0 stay, 1 up, 2 down, 3 left, 4 right
-
-    Observation (8 dims):
-      [pac_x, pac_y, ghost_x, ghost_y, powered_frac, pellets_frac, cherry_alive, power_frac]
-      where coordinates are normalized into [-1, 1].
+    Actor coordinates are continuous (float), so Pac-Man/ghosts can be between cells.
     """
 
     def __init__(self, renderer: PacManRenderer, cfg: PacManConfig | dict | None = None, **cfg_overrides):
@@ -29,59 +26,62 @@ class PacManEnv(PBREnv):
             batch_size=torch.Size([cfg.num_scenes]),
         )
 
-        self.cfg: PacManConfig = cfg  # typing hint
+        self.cfg: PacManConfig = cfg
+        self.spec = build_spec(self.cfg)
+        self.layout = self.spec["layout"]
+        self.W, self.H = self.layout.width, self.layout.height
+
+        self.pac_start = self.spec["pac_start"]
+        self.ghost_starts = self.spec["ghost_starts"]
+        self.pellet_cells = self.spec["pellet_cells"]
+        self.power_cells = self.spec["power_cells"]
+        self.cherry_cells = self.spec["cherry_cells"]
+
+        self.num_ghosts = len(self.ghost_starts)
+        self.n_pellets = len(self.pellet_cells)
+        self.n_power = len(self.power_cells)
+        self.n_cherries = len(self.cherry_cells)
+
+        self.obs_dim = 2 * (1 + self.num_ghosts) + self.n_pellets + self.n_power + self.n_cherries
+
         self.max_steps = int(cfg.max_steps)
         self.auto_reset = bool(cfg.auto_reset)
         self.powered_steps = int(cfg.powered_steps)
         self.render = bool(cfg.render)
 
+        self.pacman_step_size = float(cfg.pacman_step_size)
+        self.ghost_step_size = float(cfg.ghost_step_size)
+        self.actor_radius = float(cfg.actor_radius)
+        self.collect_radius = float(cfg.collect_radius)
+        self.collision_radius = float(cfg.collision_radius)
+
         self.set_default_specs(
-            direct_obs_dim=8,
+            direct_obs_dim=self.obs_dim,
             actions=5,
             with_pixels=self.render,
             pixels_only=False,
             discrete_actions=True,
         )
 
-        # Map must match renderer map
-        self.map_rows = renderer.map_rows
-        self.H = len(self.map_rows)
-        self.W = len(self.map_rows[0])
-
-        # Grid->world conversion helper from renderer
-        self._to_world_xy = renderer._to_world_xy
-
         self.walkable = torch.zeros((self.H, self.W), dtype=torch.bool)
-        for y, row in enumerate(self.map_rows):
-            for x, c in enumerate(row):
-                self.walkable[y, x] = c != "#"
+        for y in range(self.H):
+            for x in range(self.W):
+                self.walkable[y, x] = self.layout.is_walkable(x, y)
 
-        # Collectible coordinates (same ordering as renderer.collectible_coords)
-        self.collect_xy: list[tuple[int, int]] = []
-        for y, row in enumerate(self.map_rows):
-            for x, c in enumerate(row):
-                if c != "#":
-                    self.collect_xy.append((x, y))
+        self.pellet_xy = torch.tensor(self.pellet_cells, dtype=torch.float32, device=self.device) if self.n_pellets else torch.zeros((0, 2), dtype=torch.float32, device=self.device)
+        self.power_xy = torch.tensor(self.power_cells, dtype=torch.float32, device=self.device) if self.n_power else torch.zeros((0, 2), dtype=torch.float32, device=self.device)
+        self.cherry_xy = torch.tensor(self.cherry_cells, dtype=torch.float32, device=self.device) if self.n_cherries else torch.zeros((0, 2), dtype=torch.float32, device=self.device)
 
-        self.n_collect = len(self.collect_xy)
-        self.collect_index = {xy: i for i, xy in enumerate(self.collect_xy)}
-
-        # Fixed special items in-grid
-        self.pac_start = (1, 1)
-        self.ghost_start = (self.W - 2, self.H - 2)
-        self.cherry_cell = (self.W // 2, self.H // 2)
-        self.power_cells = [(1, self.H - 2), (self.W - 2, 1), (self.W - 2, self.H - 2), (1, 1)]
-
-        # Runtime state tensors
         B = int(cfg.num_scenes)
-        self.pac_xy = torch.zeros((B, 2), dtype=torch.long, device=self.device)
-        self.ghost_xy = torch.zeros((B, 2), dtype=torch.long, device=self.device)
+        self.pac_xy = torch.zeros((B, 2), dtype=torch.float32, device=self.device)
+        self.ghosts_xy = torch.zeros((B, self.num_ghosts, 2), dtype=torch.float32, device=self.device)
+
+        self.pellet_alive = torch.zeros((B, self.n_pellets), dtype=torch.bool, device=self.device)
+        self.power_alive = torch.zeros((B, self.n_power), dtype=torch.bool, device=self.device)
+        self.cherry_alive = torch.zeros((B, self.n_cherries), dtype=torch.bool, device=self.device)
+
         self.power_timer = torch.zeros((B,), dtype=torch.long, device=self.device)
         self.step_count = torch.zeros((B,), dtype=torch.long, device=self.device)
-
-        self.pellet_alive = torch.zeros((B, self.n_collect), dtype=torch.bool, device=self.device)
-        self.cherry_alive = torch.zeros((B, self.n_collect), dtype=torch.bool, device=self.device)
-        self.power_alive = torch.zeros((B, self.n_collect), dtype=torch.bool, device=self.device)
 
         self._last_render_payload = None
         self.set_seed(int(cfg.seed))
@@ -91,54 +91,75 @@ class PacManEnv(PBREnv):
         self.rng.manual_seed(int(seed))
 
     def _normalize_xy(self, xy: torch.Tensor) -> torch.Tensor:
-        # grid [0,W-1],[0,H-1] -> [-1,1]
-        x = (xy[:, 0].to(torch.float32) / max(1.0, (self.W - 1))) * 2.0 - 1.0
-        y = (xy[:, 1].to(torch.float32) / max(1.0, (self.H - 1))) * 2.0 - 1.0
+        x = (xy[..., 0] / max(1.0, (self.W - 1))) * 2.0 - 1.0
+        y = (xy[..., 1] / max(1.0, (self.H - 1))) * 2.0 - 1.0
         return torch.stack([x, y], dim=-1)
 
     def _obs(self) -> torch.Tensor:
         pac = self._normalize_xy(self.pac_xy)
-        ghost = self._normalize_xy(self.ghost_xy)
-        powered_frac = (self.power_timer.to(torch.float32) / max(1, self.powered_steps)).unsqueeze(-1)
-        pellets_frac = self.pellet_alive.to(torch.float32).mean(dim=1, keepdim=True)
-        cherry_alive = self.cherry_alive.to(torch.float32).amax(dim=1, keepdim=True)
-        power_frac = self.power_alive.to(torch.float32).mean(dim=1, keepdim=True)
-        return torch.cat([pac, ghost, powered_frac, pellets_frac, cherry_alive, power_frac], dim=-1)
+        ghosts = self._normalize_xy(self.ghosts_xy).reshape(self.batch_size[0], -1)
+        items = torch.cat(
+            [
+                self.pellet_alive.to(torch.float32),
+                self.power_alive.to(torch.float32),
+                self.cherry_alive.to(torch.float32),
+            ],
+            dim=1,
+        )
+        return torch.cat([pac, ghosts, items], dim=1)
 
-    def _prepare_items(self):
-        B = self.batch_size[0]
-        self.pellet_alive[:] = True
-        self.cherry_alive[:] = False
-        self.power_alive[:] = False
+    def _is_pos_walkable(self, pos: torch.Tensor) -> torch.Tensor:
+        """Approximate circular actor collision vs wall cells."""
+        B = pos.shape[0]
+        out = torch.ones((B,), dtype=torch.bool, device=self.device)
+        r = self.actor_radius
+        offsets = [(-r, -r), (-r, r), (r, -r), (r, r), (0.0, 0.0)]
 
-        # Remove regular pellets where special entities start
-        for cell in [self.pac_start, self.ghost_start, self.cherry_cell, *self.power_cells]:
-            idx = self.collect_index[cell]
-            self.pellet_alive[:, idx] = False
+        for b in range(B):
+            x = float(pos[b, 0])
+            y = float(pos[b, 1])
+            ok = True
+            for ox, oy in offsets:
+                sx, sy = x + ox, y + oy
+                if sx < 0 or sx > self.W - 1 or sy < 0 or sy > self.H - 1:
+                    ok = False
+                    break
+                cx, cy = int(round(sx)), int(round(sy))
+                if not bool(self.walkable[cy, cx]):
+                    ok = False
+                    break
+            out[b] = ok
+        return out
 
-        # Cherry at one cell
-        self.cherry_alive[:, self.collect_index[self.cherry_cell]] = True
+    def _init_scene(self, mask: torch.Tensor | None = None):
+        if mask is None:
+            mask = torch.ones((self.batch_size[0],), dtype=torch.bool, device=self.device)
+        if mask.sum() == 0:
+            return
 
-        # Power pills at selected cells
-        for cell in self.power_cells:
-            self.power_alive[:, self.collect_index[cell]] = True
+        self.pac_xy[mask] = torch.tensor(self.pac_start, dtype=torch.float32, device=self.device)
+        for gi, g in enumerate(self.ghost_starts):
+            self.ghosts_xy[mask, gi] = torch.tensor(g, dtype=torch.float32, device=self.device)
+
+        if self.n_pellets:
+            self.pellet_alive[mask] = True
+        if self.n_power:
+            self.power_alive[mask] = True
+        if self.n_cherries:
+            self.cherry_alive[mask] = True
+        self.power_timer[mask] = 0
+        self.step_count[mask] = 0
 
     def _build_render_payload(self):
-        def grid_to_world(xy: torch.Tensor) -> torch.Tensor:
-            out = torch.zeros((xy.shape[0], 2), dtype=torch.float32, device=xy.device)
-            for i in range(xy.shape[0]):
-                wx, wy = self._to_world_xy(int(xy[i, 0]), int(xy[i, 1]))
-                out[i, 0] = wx
-                out[i, 1] = wy
-            return out
-
         self._last_render_payload = {
-            "pac_xy": grid_to_world(self.pac_xy).cpu(),
-            "ghost_xy": grid_to_world(self.ghost_xy).cpu(),
-            "pellet_alive": self.pellet_alive.cpu(),
-            "cherry_alive": self.cherry_alive.cpu(),
-            "power_alive": self.power_alive.cpu(),
-            "powered": (self.power_timer > 0).cpu(),
+            "pac_xy": self.pac_xy.detach().cpu(),
+            "ghosts_xy": self.ghosts_xy.detach().cpu(),
+            "pellet_xy": self.pellet_xy.detach().cpu(),
+            "pellet_alive": self.pellet_alive.detach().cpu(),
+            "power_xy": self.power_xy.detach().cpu(),
+            "power_alive": self.power_alive.detach().cpu(),
+            "cherry_xy": self.cherry_xy.detach().cpu(),
+            "cherry_alive": self.cherry_alive.detach().cpu(),
         }
 
     def render_pixels(self, obs: torch.Tensor | None = None) -> torch.Tensor:
@@ -147,72 +168,76 @@ class PacManEnv(PBREnv):
         return self._renderer.step(self._last_render_payload)
 
     def _reset(self, tensordict: TensorDict | None = None) -> TensorDict:
-        B = self.batch_size[0]
-        self.pac_xy[:] = torch.tensor(self.pac_start, device=self.device)
-        self.ghost_xy[:] = torch.tensor(self.ghost_start, device=self.device)
-        self.power_timer.zero_()
-        self.step_count.zero_()
-        self._prepare_items()
-
+        self._init_scene(None)
         obs = self._obs()
-        done = torch.zeros((B, 1), dtype=torch.bool, device=self.device)
-        td_fields = {
+        done = torch.zeros((self.batch_size[0], 1), dtype=torch.bool, device=self.device)
+        fields = {
             "observation": obs,
             "step_count": self.step_count.clone(),
             "done": done,
         }
         if self.render:
             self._build_render_payload()
-            td_fields["pixels"] = self.render_pixels(obs)
-        return TensorDict(td_fields, batch_size=self.batch_size)
+            fields["pixels"] = self.render_pixels(obs)
+        return TensorDict(fields, batch_size=self.batch_size)
 
     def _apply_action(self, action: torch.Tensor):
-        # 0 stay, 1 up, 2 down, 3 left, 4 right
-        delta = torch.zeros((action.shape[0], 2), dtype=torch.long, device=self.device)
-        delta[action == 1] = torch.tensor([0, -1], device=self.device)
-        delta[action == 2] = torch.tensor([0, 1], device=self.device)
-        delta[action == 3] = torch.tensor([-1, 0], device=self.device)
-        delta[action == 4] = torch.tensor([1, 0], device=self.device)
+        delta = torch.zeros((action.shape[0], 2), dtype=torch.float32, device=self.device)
+        s = self.pacman_step_size
+        delta[action == 1] = torch.tensor([0.0, -s], device=self.device)
+        delta[action == 2] = torch.tensor([0.0, s], device=self.device)
+        delta[action == 3] = torch.tensor([-s, 0.0], device=self.device)
+        delta[action == 4] = torch.tensor([s, 0.0], device=self.device)
 
         cand = self.pac_xy + delta
-        cand[:, 0] = cand[:, 0].clamp(0, self.W - 1)
-        cand[:, 1] = cand[:, 1].clamp(0, self.H - 1)
-
-        ok = self.walkable[cand[:, 1].cpu(), cand[:, 0].cpu()].to(self.device)
+        ok = self._is_pos_walkable(cand)
         self.pac_xy = torch.where(ok.unsqueeze(-1), cand, self.pac_xy)
 
-    def _move_ghost(self):
-        # Random valid one-step move
-        moves = torch.tensor([[0, -1], [0, 1], [-1, 0], [1, 0], [0, 0]], dtype=torch.long, device=self.device)
+    def _move_ghosts(self):
+        s = self.ghost_step_size
+        moves = torch.tensor([[0.0, -s], [0.0, s], [-s, 0.0], [s, 0.0], [0.0, 0.0]], dtype=torch.float32, device=self.device)
         B = self.batch_size[0]
-        for i in range(B):
-            candidates = self.ghost_xy[i].unsqueeze(0) + moves
-            candidates[:, 0] = candidates[:, 0].clamp(0, self.W - 1)
-            candidates[:, 1] = candidates[:, 1].clamp(0, self.H - 1)
-            valid = self.walkable[candidates[:, 1].cpu(), candidates[:, 0].cpu()]
-            valid_idx = torch.where(valid)[0]
-            pick = valid_idx[torch.randint(0, len(valid_idx), (1,), generator=self.rng)][0]
-            self.ghost_xy[i] = candidates[pick]
+        for b in range(B):
+            for g in range(self.num_ghosts):
+                cur = self.ghosts_xy[b, g].unsqueeze(0)
+                candidates = cur + moves
+                valid = self._is_pos_walkable(candidates)
+                valid_idx = torch.where(valid)[0]
+                if len(valid_idx) == 0:
+                    continue
+                k = valid_idx[torch.randint(0, len(valid_idx), (1,), generator=self.rng)][0]
+                self.ghosts_xy[b, g] = candidates[k]
 
-    def _collect_items(self) -> torch.Tensor:
+    def _collect_group(self, actor_xy: torch.Tensor, item_xy: torch.Tensor, alive: torch.Tensor) -> torch.Tensor:
+        if item_xy.shape[0] == 0:
+            return torch.zeros((actor_xy.shape[0], 0), dtype=torch.bool, device=self.device)
+        d = actor_xy.unsqueeze(1) - item_xy.unsqueeze(0)
+        dist = torch.sqrt((d * d).sum(dim=-1))
+        hit = dist <= self.collect_radius
+        return hit & alive
+
+    def _collect(self) -> torch.Tensor:
         B = self.batch_size[0]
         reward = torch.full((B, 1), float(self.cfg.step_penalty), dtype=torch.float32, device=self.device)
 
-        for i in range(B):
-            cell = (int(self.pac_xy[i, 0]), int(self.pac_xy[i, 1]))
-            idx = self.collect_index.get(cell)
-            if idx is None:
-                continue
-            if self.pellet_alive[i, idx]:
-                self.pellet_alive[i, idx] = False
-                reward[i, 0] += float(self.cfg.reward_pellet)
-            if self.cherry_alive[i, idx]:
-                self.cherry_alive[i, idx] = False
-                reward[i, 0] += float(self.cfg.reward_cherry)
-            if self.power_alive[i, idx]:
-                self.power_alive[i, idx] = False
-                self.power_timer[i] = self.powered_steps
-                reward[i, 0] += float(self.cfg.reward_power_pill)
+        if self.n_pellets:
+            hit = self._collect_group(self.pac_xy, self.pellet_xy, self.pellet_alive)
+            got = hit.any(dim=1)
+            self.pellet_alive[hit] = False
+            reward[got] += float(self.cfg.reward_pellet)
+
+        if self.n_power:
+            hit = self._collect_group(self.pac_xy, self.power_xy, self.power_alive)
+            got = hit.any(dim=1)
+            self.power_alive[hit] = False
+            self.power_timer[got] = self.powered_steps
+            reward[got] += float(self.cfg.reward_power_pill)
+
+        if self.n_cherries:
+            hit = self._collect_group(self.pac_xy, self.cherry_xy, self.cherry_alive)
+            got = hit.any(dim=1)
+            self.cherry_alive[hit] = False
+            reward[got] += float(self.cfg.reward_cherry)
 
         return reward
 
@@ -220,61 +245,46 @@ class PacManEnv(PBREnv):
     def _step(self, tensordict: TensorDict) -> TensorDict:
         action = tensordict["action"].to(self.device)
         self._apply_action(action)
-        self._move_ghost()
+        self._move_ghosts()
 
-        reward = self._collect_items()
+        reward = self._collect()
 
-        # Collision logic
-        collide = (self.pac_xy == self.ghost_xy).all(dim=1)
+        d = self.ghosts_xy - self.pac_xy.unsqueeze(1)
+        ghost_dist = torch.sqrt((d * d).sum(dim=-1))
+        collide = (ghost_dist <= self.collision_radius).any(dim=1)
+
         powered = self.power_timer > 0
         eat_ghost = collide & powered
         lose = collide & (~powered)
 
         if eat_ghost.any():
-            self.ghost_xy[eat_ghost] = torch.tensor(self.ghost_start, device=self.device)
+            idx = torch.where(eat_ghost)[0]
+            for g, start in enumerate(self.ghost_starts):
+                self.ghosts_xy[idx, g] = torch.tensor(start, dtype=torch.float32, device=self.device)
             reward[eat_ghost] += float(self.cfg.reward_eat_ghost)
 
         done = lose.unsqueeze(-1)
         reward[lose] += float(self.cfg.reward_lose)
 
-        # Win condition: all collectible groups consumed
-        no_items_left = (~self.pellet_alive & ~self.cherry_alive & ~self.power_alive).all(dim=1)
-        newly_won = no_items_left & (~done.squeeze(-1))
-        reward[newly_won] += float(self.cfg.reward_win)
-        done = done | newly_won.unsqueeze(-1)
+        no_pellets = (~self.pellet_alive).all(dim=1) if self.n_pellets else torch.ones((self.batch_size[0],), dtype=torch.bool, device=self.device)
+        no_power = (~self.power_alive).all(dim=1) if self.n_power else torch.ones((self.batch_size[0],), dtype=torch.bool, device=self.device)
+        no_cherries = (~self.cherry_alive).all(dim=1) if self.n_cherries else torch.ones((self.batch_size[0],), dtype=torch.bool, device=self.device)
+        all_items_eaten = no_pellets & no_power & no_cherries
+        win = all_items_eaten & (~done.squeeze(-1))
+        reward[win] += float(self.cfg.reward_win)
+        done = done | win.unsqueeze(-1)
 
-        # Max step termination
         done = done | (self.step_count >= (self.max_steps - 1)).unsqueeze(-1)
 
-        # Update timers
         self.power_timer = torch.clamp(self.power_timer - 1, min=0)
+        self.step_count += 1
 
-        # Auto reset selected scenes
         if self.auto_reset and done.any():
-            idx = done.squeeze(-1)
-            self.pac_xy[idx] = torch.tensor(self.pac_start, device=self.device)
-            self.ghost_xy[idx] = torch.tensor(self.ghost_start, device=self.device)
-            self.power_timer[idx] = 0
-            self.step_count[idx] = 0
-            # reset collectibles for completed scenes only
-            pellets, cherries, powers = self.pellet_alive[idx], self.cherry_alive[idx], self.power_alive[idx]
-            pellets[:] = True
-            cherries[:] = False
-            powers[:] = False
-            for cell in [self.pac_start, self.ghost_start, self.cherry_cell, *self.power_cells]:
-                ii = self.collect_index[cell]
-                pellets[:, ii] = False
-            cherries[:, self.collect_index[self.cherry_cell]] = True
-            for cell in self.power_cells:
-                powers[:, self.collect_index[cell]] = True
-            self.pellet_alive[idx], self.cherry_alive[idx], self.power_alive[idx] = pellets, cherries, powers
-        else:
-            self.step_count += 1
+            self._init_scene(done.squeeze(-1))
 
         obs = self._obs()
-        self.step_count += (~done.squeeze(-1)).to(torch.long)
 
-        out_fields = {
+        fields = {
             "observation": obs,
             "reward": reward,
             "done": done,
@@ -283,6 +293,6 @@ class PacManEnv(PBREnv):
 
         if self.render:
             self._build_render_payload()
-            out_fields["pixels"] = self.render_pixels(obs)
+            fields["pixels"] = self.render_pixels(obs)
 
-        return TensorDict(out_fields, batch_size=self.batch_size)
+        return TensorDict(fields, batch_size=self.batch_size)
