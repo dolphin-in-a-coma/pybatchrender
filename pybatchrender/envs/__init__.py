@@ -173,6 +173,13 @@ def _register_builtins() -> None:
     except ImportError:
         pass
 
+    # Pac-Man-like 2D environment
+    try:
+        from .pacman import PacManEnv, PacManRenderer, PacManConfig
+        register("PacMan-v0", PacManEnv, PacManRenderer, PacManConfig)
+    except ImportError:
+        pass
+
 
 def _register_from_entry_points() -> None:
     """
