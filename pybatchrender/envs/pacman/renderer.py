@@ -30,13 +30,13 @@ class PacManRenderer(PBRRenderer):
         num_scenes = int(self.cfg.num_scenes)
 
         if self.flat_2d:
-            self.walls = self.add_node(plane_model_path(), texture=sprite_path("wall_blue.png"), model_scale=(0.96, 0.96, 0.02), model_scale_units="absolute", model_hpr=(0.0, -90.0, 0.0), instances_per_scene=max(1, len(self.wall_cells)), shared_across_scenes=True)
-            self.tracks = self.add_node(plane_model_path(), texture=sprite_path("track_dark.png"), model_scale=(0.96, 0.96, 0.02), model_scale_units="absolute", model_hpr=(0.0, -90.0, 0.0), instances_per_scene=max(1, len(self.track_cells)), shared_across_scenes=True)
-            self.pacman = add_sprite_node(self, texture="pacman.png", instances_per_scene=1, scale_xy=(0.64, 0.64), z=0.02)
-            self.ghosts = self.add_node(plane_model_path(), texture=sprite_path("ghost_red.png"), model_scale=(0.58, 0.58, 0.02), model_scale_units="absolute", model_hpr=(0.0, -90.0, 0.0), instances_per_scene=max(1, self.num_ghosts), shared_across_scenes=False, sprite_transparency=True, depth_write=False, depth_test=True, bin_name="transparent", bin_sort=12)
-            self.pellets = add_sprite_node(self, texture="pellet.png", instances_per_scene=max(1, len(self.pellet_cells)), scale_xy=(0.14, 0.14), z=0.02)
-            self.power_pellets = add_sprite_node(self, texture="power_pellet.png", instances_per_scene=max(1, len(self.power_cells)), scale_xy=(0.30, 0.30), z=0.02)
-            self.cherries = add_sprite_node(self, texture="cherry.png", instances_per_scene=max(1, len(self.cherry_cells)), scale_xy=(0.28, 0.28), z=0.02)
+            self.walls = self.add_node(plane_model_path(), texture=sprite_path("wall_blue.png"), model_scale=(0.96, 0.001, 0.96), model_scale_units="absolute", model_hpr=(0.0, -90.0, 0.0), instances_per_scene=max(1, len(self.wall_cells)), shared_across_scenes=True, sprite_transparency=True, depth_write=False, depth_test=False, bin_name="transparent", bin_sort=2)
+            self.tracks = self.add_node(plane_model_path(), texture=sprite_path("track_dark.png"), model_scale=(0.96, 0.001, 0.96), model_scale_units="absolute", model_hpr=(0.0, -90.0, 0.0), instances_per_scene=max(1, len(self.track_cells)), shared_across_scenes=True, sprite_transparency=True, depth_write=False, depth_test=False, bin_name="transparent", bin_sort=1)
+            self.pacman = add_sprite_node(self, texture="pacman.png", instances_per_scene=1, scale_xy=(0.64, 0.64))
+            self.ghosts = self.add_node(plane_model_path(), texture=sprite_path("ghost_red.png"), model_scale=(0.58, 0.001, 0.58), model_scale_units="absolute", model_hpr=(0.0, -90.0, 0.0), instances_per_scene=max(1, self.num_ghosts), shared_across_scenes=False, sprite_transparency=True, depth_write=False, depth_test=False, bin_name="transparent", bin_sort=12)
+            self.pellets = add_sprite_node(self, texture="pellet.png", instances_per_scene=max(1, len(self.pellet_cells)), scale_xy=(0.14, 0.14))
+            self.power_pellets = add_sprite_node(self, texture="power_pellet.png", instances_per_scene=max(1, len(self.power_cells)), scale_xy=(0.30, 0.30))
+            self.cherries = add_sprite_node(self, texture="cherry.png", instances_per_scene=max(1, len(self.cherry_cells)), scale_xy=(0.28, 0.28))
         else:
             self.walls = self.add_node("models/box", model_pivot_relative_point=(0.5, 0.5, 0.5), model_scale=(0.96, 0.96, 0.24), instances_per_scene=max(1, len(self.wall_cells)), shared_across_scenes=True)
             self.tracks = self.add_node("models/box", model_pivot_relative_point=(0.5, 0.5, 0.5), model_scale=(0.96, 0.96, 0.04), instances_per_scene=max(1, len(self.track_cells)), shared_across_scenes=True)

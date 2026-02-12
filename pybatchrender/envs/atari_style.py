@@ -46,18 +46,23 @@ def plane_model_path() -> str:
     return str(_PLANE_MODEL.resolve())
 
 
-def add_sprite_node(renderer, *, texture: str, instances_per_scene: int, scale_xy: tuple[float, float], z: float = 0.02):
+def add_sprite_node(renderer, *, texture: str, instances_per_scene: int, scale_xy: tuple[float, float], thickness: float = 0.001):
+    """Add a textured plane as a 2D sprite.
+
+    `plane.egg` lies in XZ, so we map sprite width->X and sprite height->Z.
+    Y is only a tiny thickness term.
+    """
     return renderer.add_node(
         plane_model_path(),
         texture=sprite_path(texture),
-        model_scale=(float(scale_xy[0]), float(scale_xy[1]), float(z)),
+        model_scale=(float(scale_xy[0]), float(thickness), float(scale_xy[1])),
         model_scale_units="absolute",
         model_hpr=(0.0, -90.0, 0.0),
         instances_per_scene=int(instances_per_scene),
         shared_across_scenes=False,
         sprite_transparency=True,
         depth_write=False,
-        depth_test=True,
+        depth_test=False,
         bin_name="transparent",
         bin_sort=10,
     )
