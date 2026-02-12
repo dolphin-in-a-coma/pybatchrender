@@ -5,7 +5,7 @@ import torch
 
 from ...config import PBRConfig
 from ...renderer.renderer import PBRRenderer
-from ..atari_style import light_kwargs, topdown_camera_pose, use_2d
+from ..atari_style import add_sprite_node, light_kwargs, topdown_camera_pose, use_2d
 
 
 class PingPongRenderer(PBRRenderer):
@@ -16,15 +16,13 @@ class PingPongRenderer(PBRRenderer):
 
         if flat_2d:
             self.setBackgroundColor(0.0, 0.0, 0.0, 1.0)
-            paddle_scale = (0.06, 0.30, 0.02)
-            ball_scale = (0.08, 0.08, 0.02)
+            self.left = add_sprite_node(self, texture="pingpong_paddle.png", instances_per_scene=1, scale_xy=(0.06, 0.30))
+            self.right = add_sprite_node(self, texture="pingpong_paddle.png", instances_per_scene=1, scale_xy=(0.06, 0.30))
+            self.ball = add_sprite_node(self, texture="pingpong_ball.png", instances_per_scene=1, scale_xy=(0.08, 0.08))
         else:
-            paddle_scale = (0.06, 0.30, 0.06)
-            ball_scale = (0.08, 0.08, 0.08)
-
-        self.left = self.add_node("models/box", model_pivot_relative_point=(0.5, 0.5, 0.5), model_scale=paddle_scale, instances_per_scene=1, shared_across_scenes=False)
-        self.right = self.add_node("models/box", model_pivot_relative_point=(0.5, 0.5, 0.5), model_scale=paddle_scale, instances_per_scene=1, shared_across_scenes=False)
-        self.ball = self.add_node("models/smiley", model_scale=ball_scale, model_scale_units="absolute", instances_per_scene=1, shared_across_scenes=False)
+            self.left = self.add_node("models/box", model_pivot_relative_point=(0.5, 0.5, 0.5), model_scale=(0.06, 0.30, 0.06), instances_per_scene=1, shared_across_scenes=False)
+            self.right = self.add_node("models/box", model_pivot_relative_point=(0.5, 0.5, 0.5), model_scale=(0.06, 0.30, 0.06), instances_per_scene=1, shared_across_scenes=False)
+            self.ball = self.add_node("models/smiley", model_scale=(0.08, 0.08, 0.08), model_scale_units="absolute", instances_per_scene=1, shared_across_scenes=False)
 
         self.left_pos = torch.zeros((n, 1, 3), dtype=torch.float32)
         self.right_pos = torch.zeros((n, 1, 3), dtype=torch.float32)
