@@ -19,6 +19,9 @@ class BreakoutConfig(PBRConfig):
     seed: int = 0
     render: bool = True
 
+    # Visual style
+    use_2d_objects: bool = True
+
     brick_rows: int = 4
     brick_cols: int = 8
     paddle_speed: float = 0.10

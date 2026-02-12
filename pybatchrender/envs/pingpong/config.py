@@ -20,6 +20,9 @@ class PingPongConfig(PBRConfig):
     seed: int = 0
     render: bool = True
 
+    # Visual style
+    use_2d_objects: bool = True
+
     paddle_speed: float = 0.08
     paddle_height: float = 0.30
     ball_speed: float = 0.04

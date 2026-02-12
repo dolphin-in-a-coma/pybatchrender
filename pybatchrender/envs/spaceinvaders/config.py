@@ -19,6 +19,9 @@ class SpaceInvadersConfig(PBRConfig):
     seed: int = 0
     render: bool = True
 
+    # Visual style
+    use_2d_objects: bool = True
+
     rows: int = 3
     cols: int = 6
     player_speed: float = 0.09

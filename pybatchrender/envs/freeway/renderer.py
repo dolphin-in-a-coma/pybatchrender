@@ -5,6 +5,7 @@ import torch
 
 from ...config import PBRConfig
 from ...renderer.renderer import PBRRenderer
+from ..atari_style import light_kwargs, topdown_camera_pose, use_2d
 
 
 class FreewayRenderer(PBRRenderer):
@@ -14,12 +15,23 @@ class FreewayRenderer(PBRRenderer):
         self.cars_per_lane = int(getattr(self.cfg, "cars_per_lane", 2))
         self.n_cars = self.lanes * self.cars_per_lane
         n = int(self.cfg.num_scenes)
+        flat_2d = use_2d(self.cfg)
 
-        self.chicken = self.add_node("models/smiley", model_scale=(0.10, 0.10, 0.08), model_scale_units="absolute", instances_per_scene=1, shared_across_scenes=False)
-        self.cars = self.add_node("models/box", model_pivot_relative_point=(0.5, 0.5, 0.5), model_scale=(0.16, 0.08, 0.06), instances_per_scene=self.n_cars, shared_across_scenes=False)
+        if flat_2d:
+            self.setBackgroundColor(0.0, 0.0, 0.0, 1.0)
+            chicken_scale = (0.10, 0.10, 0.02)
+            car_scale = (0.16, 0.08, 0.02)
+        else:
+            chicken_scale = (0.10, 0.10, 0.08)
+            car_scale = (0.16, 0.08, 0.06)
+
+        self.chicken = self.add_node("models/smiley", model_scale=chicken_scale, model_scale_units="absolute", instances_per_scene=1, shared_across_scenes=False)
+        self.cars = self.add_node("models/box", model_pivot_relative_point=(0.5, 0.5, 0.5), model_scale=car_scale, instances_per_scene=self.n_cars, shared_across_scenes=False)
 
         self.chicken_pos = torch.zeros((n, 1, 3), dtype=torch.float32)
         self.cars_pos = torch.zeros((n, self.n_cars, 3), dtype=torch.float32)
+        self.chicken_pos[:, :, 2] = 0.06
+        self.cars_pos[:, :, 2] = 0.05
 
         lane_h = 2.0 / max(1, self.lanes)
         for lane in range(self.lanes):
@@ -30,10 +42,11 @@ class FreewayRenderer(PBRRenderer):
         self.chicken.set_colors(torch.tensor([[[1.0, 0.95, 0.25, 1.0]]], dtype=torch.float32).repeat(n, 1, 1))
         self.cars.set_colors(torch.tensor([[[1.0, 0.3, 0.3, 1.0]]], dtype=torch.float32).repeat(n, self.n_cars, 1))
 
-        self.add_camera(fov_y_deg=45.0)
-        self._pbr_cam.set_positions(torch.tensor([0.0, -3.0, 0.0], dtype=torch.float32))
-        self._pbr_cam.look_at(torch.tensor([0.0, 0.0, 0.0], dtype=torch.float32))
-        self.add_light(ambient=(0.35, 0.35, 0.35))
+        cam_pos, cam_look, cam_fov = topdown_camera_pose(arena_extent=1.8)
+        self.add_camera(fov_y_deg=cam_fov)
+        self._pbr_cam.set_positions(cam_pos)
+        self._pbr_cam.look_at(cam_look)
+        self.add_light(**light_kwargs(flat_2d))
         self.setup_environment()
 
     def _step(self, state_batch=None):

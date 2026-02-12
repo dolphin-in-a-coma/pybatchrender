@@ -19,6 +19,9 @@ class FreewayConfig(PBRConfig):
     seed: int = 0
     render: bool = True
 
+    # Visual style
+    use_2d_objects: bool = True
+
     lanes: int = 6
     cars_per_lane: int = 2
     chicken_step: float = 0.10

@@ -19,6 +19,9 @@ class AsteroidsConfig(PBRConfig):
     seed: int = 0
     render: bool = True
 
+    # Visual style
+    use_2d_objects: bool = True
+
     num_asteroids: int = 6
     ship_speed: float = 0.08
     asteroid_speed: float = 0.03

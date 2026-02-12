@@ -5,6 +5,7 @@ import torch
 
 from ...config import PBRConfig
 from ...renderer.renderer import PBRRenderer
+from ..atari_style import light_kwargs, topdown_camera_pose, use_2d
 
 
 class AsteroidsRenderer(PBRRenderer):
@@ -12,19 +13,31 @@ class AsteroidsRenderer(PBRRenderer):
         super().__init__(cfg)
         self.n_ast = int(getattr(self.cfg, "num_asteroids", 6))
         n = int(self.cfg.num_scenes)
+        flat_2d = use_2d(self.cfg)
 
-        self.ship = self.add_node("models/box", model_pivot_relative_point=(0.5, 0.5, 0.5), model_scale=(0.10, 0.10, 0.06), instances_per_scene=1, shared_across_scenes=False)
-        self.asts = self.add_node("models/smiley", model_scale=(0.10, 0.10, 0.08), model_scale_units="absolute", instances_per_scene=self.n_ast, shared_across_scenes=False)
+        if flat_2d:
+            self.setBackgroundColor(0.0, 0.0, 0.0, 1.0)
+            ship_scale = (0.10, 0.10, 0.02)
+            ast_scale = (0.10, 0.10, 0.02)
+        else:
+            ship_scale = (0.10, 0.10, 0.06)
+            ast_scale = (0.10, 0.10, 0.08)
+
+        self.ship = self.add_node("models/box", model_pivot_relative_point=(0.5, 0.5, 0.5), model_scale=ship_scale, instances_per_scene=1, shared_across_scenes=False)
+        self.asts = self.add_node("models/smiley", model_scale=ast_scale, model_scale_units="absolute", instances_per_scene=self.n_ast, shared_across_scenes=False)
 
         self.ship_pos = torch.zeros((n, 1, 3), dtype=torch.float32)
         self.ast_pos = torch.zeros((n, self.n_ast, 3), dtype=torch.float32)
+        self.ship_pos[:, :, 2] = 0.05
+        self.ast_pos[:, :, 2] = 0.05
         self.ship.set_colors(torch.tensor([[[0.6, 1.0, 0.9, 1.0]]], dtype=torch.float32).repeat(n, 1, 1))
         self.asts.set_colors(torch.tensor([[[0.8, 0.8, 0.8, 1.0]]], dtype=torch.float32).repeat(n, self.n_ast, 1))
 
-        self.add_camera(fov_y_deg=45.0)
-        self._pbr_cam.set_positions(torch.tensor([0.0, -3.2, 0.0], dtype=torch.float32))
-        self._pbr_cam.look_at(torch.tensor([0.0, 0.0, 0.0], dtype=torch.float32))
-        self.add_light(ambient=(0.35, 0.35, 0.35))
+        cam_pos, cam_look, cam_fov = topdown_camera_pose(arena_extent=1.8)
+        self.add_camera(fov_y_deg=cam_fov)
+        self._pbr_cam.set_positions(cam_pos)
+        self._pbr_cam.look_at(cam_look)
+        self.add_light(**light_kwargs(flat_2d))
         self.setup_environment()
 
     def _step(self, state_batch=None):
