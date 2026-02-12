@@ -180,6 +180,37 @@ def _register_builtins() -> None:
     except ImportError:
         pass
 
+    # Atari-inspired environments
+    try:
+        from .pingpong import PingPongEnv, PingPongRenderer, PingPongConfig
+        register("PingPong-v0", PingPongEnv, PingPongRenderer, PingPongConfig)
+    except ImportError:
+        pass
+
+    try:
+        from .breakout import BreakoutEnv, BreakoutRenderer, BreakoutConfig
+        register("Breakout-v0", BreakoutEnv, BreakoutRenderer, BreakoutConfig)
+    except ImportError:
+        pass
+
+    try:
+        from .spaceinvaders import SpaceInvadersEnv, SpaceInvadersRenderer, SpaceInvadersConfig
+        register("SpaceInvaders-v0", SpaceInvadersEnv, SpaceInvadersRenderer, SpaceInvadersConfig)
+    except ImportError:
+        pass
+
+    try:
+        from .asteroids import AsteroidsEnv, AsteroidsRenderer, AsteroidsConfig
+        register("Asteroids-v0", AsteroidsEnv, AsteroidsRenderer, AsteroidsConfig)
+    except ImportError:
+        pass
+
+    try:
+        from .freeway import FreewayEnv, FreewayRenderer, FreewayConfig
+        register("Freeway-v0", FreewayEnv, FreewayRenderer, FreewayConfig)
+    except ImportError:
+        pass
+
 
 def _register_from_entry_points() -> None:
     """

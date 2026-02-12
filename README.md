@@ -37,6 +37,26 @@ for step in range(100):
     td = td["next"]
 ```
 
+Available built-ins include:
+- `CartPole-v0`
+- `PacMan-v0`
+- `PingPong-v0` (Pong-inspired)
+- `Breakout-v0`
+- `SpaceInvaders-v0`
+- `Asteroids-v0`
+- `Freeway-v0`
+
+Example for Atari-inspired envs:
+```python
+import pybatchrender as pbr
+
+env = pbr.envs.make("Breakout-v0", num_scenes=128, render=True, offscreen=True)
+td = env.reset()
+for _ in range(50):
+    td["action"] = env.action_spec.rand()
+    td = env.step(td)["next"]
+```
+
 Render simple scene:
 ```python
 from pybatchrender import PBRConfig, PBRRenderer
