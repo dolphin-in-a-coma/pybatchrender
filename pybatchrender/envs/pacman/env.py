@@ -218,7 +218,7 @@ class PacManEnv(PBREnv):
                 valid_idx = torch.where(valid)[0]
                 if len(valid_idx) == 0:
                     continue
-                k = valid_idx[torch.randint(0, len(valid_idx), (1,), generator=self.rng)][0]
+                k = valid_idx[torch.randint(0, len(valid_idx), (1,), generator=self.rng, device=self.device)][0]
                 self.ghosts_xy[b, g] = candidates[k]
 
     def _collect_group(self, actor_xy: torch.Tensor, item_xy: torch.Tensor, alive: torch.Tensor) -> torch.Tensor:
