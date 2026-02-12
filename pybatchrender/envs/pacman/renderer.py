@@ -92,9 +92,9 @@ class PacManRenderer(PBRRenderer):
         self._set_static_geometry()
         self._set_colors(num_scenes)
 
-        self._pellet_world = self._xy_list_to_world(torch.tensor(self.pellet_cells, dtype=torch.float32)) if len(self.pellet_cells) > 0 else None
-        self._power_world = self._xy_list_to_world(torch.tensor(self.power_cells, dtype=torch.float32)) if len(self.power_cells) > 0 else None
-        self._cherry_world = self._xy_list_to_world(torch.tensor(self.cherry_cells, dtype=torch.float32)) if len(self.cherry_cells) > 0 else None
+        self._pellet_world = self._xy_list_to_world(torch.tensor(self.pellet_cells, dtype=torch.float32).unsqueeze(0)) if len(self.pellet_cells) > 0 else None
+        self._power_world = self._xy_list_to_world(torch.tensor(self.power_cells, dtype=torch.float32).unsqueeze(0)) if len(self.power_cells) > 0 else None
+        self._cherry_world = self._xy_list_to_world(torch.tensor(self.cherry_cells, dtype=torch.float32).unsqueeze(0)) if len(self.cherry_cells) > 0 else None
 
         self.add_camera(fov_y_deg=38.0)
         cam_z = max(12.0, 0.85 * max(self.layout.width, self.layout.height))
