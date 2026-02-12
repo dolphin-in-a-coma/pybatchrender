@@ -44,8 +44,8 @@ images = [
   "matplotlib>=3.8",
 ]
 cuda = [
-  # CUDA runtime bindings
-  "cuda-python>=12.0,<13; platform_system != 'Darwin'",
+  # CUDA runtime bindings (cap at CUDA 12.8)
+  "cuda-python>=12.0,<=12.8; platform_system != 'Darwin'",
   # CuPy for DLPack zero-copy and device arrays (choose wheel for your CUDA)
   "cupy-cuda12x>=12.0; platform_system != 'Darwin'",
   # OpenGL constant used for interop
