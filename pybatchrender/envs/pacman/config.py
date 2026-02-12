@@ -44,6 +44,9 @@ class PacManConfig(PBRConfig):
     # Visual representation
     actor_shape: str = "circle"  # "circle" | "square"
 
+    # Fast-path mode (no game logic/collision checks; random state generation)
+    no_logic: bool = True
+
     # Movement/physics
     bind_actor_positions_to_cells: bool = False  # if True, no between-cell movement
     pacman_step_size: float = 0.35

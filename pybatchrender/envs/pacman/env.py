@@ -49,6 +49,7 @@ class PacManEnv(PBREnv):
         self.powered_steps = int(cfg.powered_steps)
         self.render = bool(cfg.render)
 
+        self.no_logic = bool(getattr(cfg, "no_logic", True))
         self.bind_to_cells = bool(getattr(cfg, "bind_actor_positions_to_cells", False))
         self.pacman_step_size = 1.0 if self.bind_to_cells else float(cfg.pacman_step_size)
         self.ghost_step_size = 1.0 if self.bind_to_cells else float(cfg.ghost_step_size)
@@ -165,6 +166,30 @@ class PacManEnv(PBREnv):
         self.power_timer[mask] = 0
         self.step_count[mask] = 0
 
+    def _randomize_state(self):
+        B = self.batch_size[0]
+
+        self.pac_xy = torch.rand((B, 2), generator=self.rng, device=self.device)
+        self.pac_xy[:, 0] *= float(self.W - 1)
+        self.pac_xy[:, 1] *= float(self.H - 1)
+
+        self.ghosts_xy = torch.rand((B, self.num_ghosts, 2), generator=self.rng, device=self.device)
+        self.ghosts_xy[..., 0] *= float(self.W - 1)
+        self.ghosts_xy[..., 1] *= float(self.H - 1)
+
+        if self.bind_to_cells:
+            self.pac_xy = self._snap_to_cells(self.pac_xy)
+            self.ghosts_xy = self._snap_to_cells(self.ghosts_xy.reshape(-1, 2)).reshape(B, self.num_ghosts, 2)
+
+        if self.n_pellets:
+            self.pellet_alive = torch.rand((B, self.n_pellets), generator=self.rng, device=self.device) > 0.3
+        if self.n_power:
+            self.power_alive = torch.rand((B, self.n_power), generator=self.rng, device=self.device) > 0.6
+        if self.n_cherries:
+            self.cherry_alive = torch.rand((B, self.n_cherries), generator=self.rng, device=self.device) > 0.8
+
+        self.power_timer = torch.randint(0, max(1, self.powered_steps + 1), (B,), generator=self.rng, device=self.device)
+
     def _build_render_payload(self):
         self._last_render_payload = {
             "pac_xy": self.pac_xy.detach().cpu(),
@@ -183,7 +208,11 @@ class PacManEnv(PBREnv):
         return self._renderer.step(self._last_render_payload)
 
     def _reset(self, tensordict: TensorDict | None = None) -> TensorDict:
-        self._init_scene(None)
+        if self.no_logic:
+            self._randomize_state()
+            self.step_count.zero_()
+        else:
+            self._init_scene(None)
         obs = self._obs()
         done = torch.zeros((self.batch_size[0], 1), dtype=torch.bool, device=self.device)
         fields = {
@@ -268,46 +297,53 @@ class PacManEnv(PBREnv):
 
     @torch.no_grad()
     def _step(self, tensordict: TensorDict) -> TensorDict:
-        action = tensordict["action"].to(self.device)
-        self._apply_action(action)
-        self._move_ghosts()
+        if self.no_logic:
+            self._randomize_state()
+            reward = torch.zeros((self.batch_size[0], 1), dtype=torch.float32, device=self.device)
+            done = torch.zeros((self.batch_size[0], 1), dtype=torch.bool, device=self.device)
+            self.step_count += 1
+            obs = self._obs()
+        else:
+            action = tensordict["action"].to(self.device)
+            self._apply_action(action)
+            self._move_ghosts()
 
-        reward = self._collect()
+            reward = self._collect()
 
-        d = self.ghosts_xy - self.pac_xy.unsqueeze(1)
-        ghost_dist = torch.sqrt((d * d).sum(dim=-1))
-        collide = (ghost_dist <= self.collision_radius).any(dim=1)
+            d = self.ghosts_xy - self.pac_xy.unsqueeze(1)
+            ghost_dist = torch.sqrt((d * d).sum(dim=-1))
+            collide = (ghost_dist <= self.collision_radius).any(dim=1)
 
-        powered = self.power_timer > 0
-        eat_ghost = collide & powered
-        lose = collide & (~powered)
+            powered = self.power_timer > 0
+            eat_ghost = collide & powered
+            lose = collide & (~powered)
 
-        if eat_ghost.any():
-            idx = torch.where(eat_ghost)[0]
-            for g, start in enumerate(self.ghost_starts):
-                self.ghosts_xy[idx, g] = torch.tensor(start, dtype=torch.float32, device=self.device)
-            reward[eat_ghost] += float(self.cfg.reward_eat_ghost)
+            if eat_ghost.any():
+                idx = torch.where(eat_ghost)[0]
+                for g, start in enumerate(self.ghost_starts):
+                    self.ghosts_xy[idx, g] = torch.tensor(start, dtype=torch.float32, device=self.device)
+                reward[eat_ghost] += float(self.cfg.reward_eat_ghost)
 
-        done = lose.unsqueeze(-1)
-        reward[lose] += float(self.cfg.reward_lose)
+            done = lose.unsqueeze(-1)
+            reward[lose] += float(self.cfg.reward_lose)
 
-        no_pellets = (~self.pellet_alive).all(dim=1) if self.n_pellets else torch.ones((self.batch_size[0],), dtype=torch.bool, device=self.device)
-        no_power = (~self.power_alive).all(dim=1) if self.n_power else torch.ones((self.batch_size[0],), dtype=torch.bool, device=self.device)
-        no_cherries = (~self.cherry_alive).all(dim=1) if self.n_cherries else torch.ones((self.batch_size[0],), dtype=torch.bool, device=self.device)
-        all_items_eaten = no_pellets & no_power & no_cherries
-        win = all_items_eaten & (~done.squeeze(-1))
-        reward[win] += float(self.cfg.reward_win)
-        done = done | win.unsqueeze(-1)
+            no_pellets = (~self.pellet_alive).all(dim=1) if self.n_pellets else torch.ones((self.batch_size[0],), dtype=torch.bool, device=self.device)
+            no_power = (~self.power_alive).all(dim=1) if self.n_power else torch.ones((self.batch_size[0],), dtype=torch.bool, device=self.device)
+            no_cherries = (~self.cherry_alive).all(dim=1) if self.n_cherries else torch.ones((self.batch_size[0],), dtype=torch.bool, device=self.device)
+            all_items_eaten = no_pellets & no_power & no_cherries
+            win = all_items_eaten & (~done.squeeze(-1))
+            reward[win] += float(self.cfg.reward_win)
+            done = done | win.unsqueeze(-1)
 
-        done = done | (self.step_count >= (self.max_steps - 1)).unsqueeze(-1)
+            done = done | (self.step_count >= (self.max_steps - 1)).unsqueeze(-1)
 
-        self.power_timer = torch.clamp(self.power_timer - 1, min=0)
-        self.step_count += 1
+            self.power_timer = torch.clamp(self.power_timer - 1, min=0)
+            self.step_count += 1
 
-        if self.auto_reset and done.any():
-            self._init_scene(done.squeeze(-1))
+            if self.auto_reset and done.any():
+                self._init_scene(done.squeeze(-1))
 
-        obs = self._obs()
+            obs = self._obs()
 
         fields = {
             "observation": obs,
