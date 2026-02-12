@@ -36,8 +36,12 @@ import pybatchrender as pbr
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="CartPole environment benchmark.",
+        description="pybatchrender environment benchmark.",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
+    parser.add_argument(
+        "--env", type=str, default="CartPole-v0",
+        help="Environment name from pbr.envs.list_envs() (e.g. CartPole-v0, PingPong-v0).",
     )
     parser.add_argument(
         "--num-scenes", type=int, default=1024,
@@ -108,12 +112,12 @@ def parse_args() -> argparse.Namespace:
 def run_single(args: argparse.Namespace) -> None:
     """Run environment in single-process mode."""
     print("=" * 60)
-    print("CartPole Benchmark - Single Process")
+    print(f"{args.env} Benchmark - Single Process")
     print("=" * 60)
     
     # Create environment using registry
     env = pbr.envs.make(
-        "CartPole-v0",
+        args.env,
         num_scenes=args.num_scenes,
         tile_resolution=tuple(args.tile_resolution),
         render=not args.no_render,
@@ -123,7 +127,7 @@ def run_single(args: argparse.Namespace) -> None:
         save_out_dir=args.save_dir,
     )
     
-    print(f"Environment: CartPole-v0")
+    print(f"Environment: {args.env}")
     print(f"Num scenes: {args.num_scenes}")
     print(f"Tile resolution: {args.tile_resolution}")
     print(f"Mode: {'offscreen' if args.offscreen else 'onscreen'}")
@@ -155,7 +159,7 @@ def run_single(args: argparse.Namespace) -> None:
                         indices=list(range(min(args.save_num, args.num_scenes))),
                         num=args.save_num,
                         out_dir=args.save_dir,
-                        filename_prefix=f"cartpole_step{step}",
+                        filename_prefix=f"{args.env.lower().replace("-","_")}_step{step}",
                     )
                     print(f"  Saved: {path}")
             except Exception as e:
@@ -179,7 +183,7 @@ def run_single(args: argparse.Namespace) -> None:
 def run_parallel(args: argparse.Namespace) -> None:
     """Run environment with parallel workers."""
     print("=" * 60)
-    print("CartPole Benchmark - Parallel Workers")
+    print(f"{args.env} Benchmark - Parallel Workers")
     print("=" * 60)
     
     num_workers = args.num_workers
@@ -187,7 +191,7 @@ def run_parallel(args: argparse.Namespace) -> None:
     # Create parallel environment using registry
     # Note: onscreen mode with parallel workers opens multiple windows (one per worker)
     env = pbr.envs.make_parallel(
-        "CartPole-v0",
+        args.env,
         num_workers=num_workers,
         num_scenes=args.num_scenes,
         tile_resolution=tuple(args.tile_resolution),
@@ -195,7 +199,7 @@ def run_parallel(args: argparse.Namespace) -> None:
         offscreen=args.offscreen,
     )
     
-    print(f"Environment: CartPole-v0")
+    print(f"Environment: {args.env}")
     print(f"Num workers: {num_workers}")
     print(f"Num scenes per worker: {args.num_scenes}")
     print(f"Total parallel scenes: {num_workers * args.num_scenes}")
@@ -240,19 +244,19 @@ def run_parallel(args: argparse.Namespace) -> None:
 def save_gif(args: argparse.Namespace) -> None:
     """Save an animated GIF of the environment."""
     print("=" * 60)
-    print("CartPole - Save Animated GIF")
+    print(f"{args.env} - Save Animated GIF")
     print("=" * 60)
     
     # Create environment
     env = pbr.envs.make(
-        "CartPole-v0",
+        args.env,
         num_scenes=args.num_scenes,
         tile_resolution=tuple(args.tile_resolution),
         render=True,  # Must be enabled for GIF
         offscreen=True,  # GIF doesn't need window
     )
     
-    print(f"Environment: CartPole-v0")
+    print(f"Environment: {args.env}")
     print(f"Num scenes: {args.num_scenes}")
     print(f"Tile resolution: {args.tile_resolution}")
     print(f"GIF steps: {args.gif_steps}")
@@ -268,7 +272,7 @@ def save_gif(args: argparse.Namespace) -> None:
         scale=args.gif_scale,
         duration_ms=args.gif_duration,
         out_dir=args.save_dir,
-        filename_prefix="cartpole_animation",
+        filename_prefix=f"{args.env.lower().replace("-","_")}_animation",
     )
     
     print(f"GIF saved to: {path}")
