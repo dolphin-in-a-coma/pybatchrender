@@ -61,11 +61,13 @@ include-package-data = true
 
 [tool.setuptools.packages.find]
 include = ["pybatchrender", "pybatchrender.*"]
+exclude = ["pybatchrender.models", "pybatchrender.models.*", "pybatchrender.shaders"]
 
 [tool.setuptools.package-data]
 pybatchrender = [
   "shaders/*.frag",
   "shaders/*.vert",
+  "models/**/*",
 ]
 
 # Entry points for environment plugins

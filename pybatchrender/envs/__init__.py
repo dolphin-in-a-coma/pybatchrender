@@ -173,6 +173,13 @@ def _register_builtins() -> None:
     except ImportError:
         pass
 
+    # Steering
+    try:
+        from .steering import SteeringEnv, SteeringRenderer, SteeringConfig
+        register("Steering-v0", SteeringEnv, SteeringRenderer, SteeringConfig)
+    except ImportError:
+        pass
+
     # Pac-Man-like 2D environment
     try:
         from .pacman import PacManEnv, PacManRenderer, PacManConfig

@@ -88,12 +88,18 @@ class PBRRenderer(ShowBase):
             except Exception:
                 pass
 
+    def set_background_color(self, r: float, g: float, b: float, a: float = 1.0) -> None:
+        """Set and store background clear color for both onscreen and offscreen rendering."""
+        self._background_color = (float(r), float(g), float(b), float(a))
+        self.setBackgroundColor(*self._background_color)
+
     def add_node(self,
             model_path: str | None,
             instances_per_scene: int,
             texture: Texture | str | bool | None = None,
             model_pivot_relative_point: tuple[float, float, float] | None = None,
             model_scale: float | Sequence[float] | None = None,
+            model_hpr: tuple[float, float, float] | None = None,
             model_scale_units: Literal["relative", "absolute"] = "relative",
             positions: 'torch.Tensor | None' = None,
             hprs: 'torch.Tensor | None' = None,
@@ -110,6 +116,7 @@ class PBRRenderer(ShowBase):
                         texture=texture,
                         model_pivot_relative_point=model_pivot_relative_point,
                         model_scale=model_scale,
+                        model_hpr=model_hpr,
                         model_scale_units=model_scale_units,
                         positions=positions, 
                         hprs=hprs,
@@ -252,6 +259,9 @@ class PBRRenderer(ShowBase):
         w = max(1, cols * tile_w)
         h = max(1, rows * tile_h)
         self.offscreen_buffer = self.win.makeTextureBuffer('pbr-screen-rt', w, h)
+        bg = getattr(self, "_background_color", (0.0, 0.0, 0.0, 1.0))
+        self.offscreen_buffer.setClearColor(bg)
+        self.offscreen_buffer.setClearColorActive(True)
         self.offscreen_tex = self.offscreen_buffer.getTexture()
         if self.offscreen_tex is not None:
             self.offscreen_tex.setKeepRamImage(True)

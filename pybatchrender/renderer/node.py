@@ -18,6 +18,7 @@ class PBRNode(PBRShaderContext):
                 texture: Texture | str | bool | None = None,
                 model_pivot_relative_point: tuple[float, float, float] | None = None,
                 model_scale: float | Sequence[float] | None = None,
+                model_hpr: tuple[float, float, float] | Sequence[float] | None = None,
                 model_scale_units: Literal["relative", "absolute"] = "relative", 
                 positions: torch.Tensor | None = None,
                 hprs: torch.Tensor | None = None,
@@ -28,8 +29,6 @@ class PBRNode(PBRShaderContext):
                 parent: 'PBRNode | NodePath | None' = None, # NOTE: parent is not fully functional yet
                 name: str | None = None
                 ) -> None:
-
-        # TODO: consider adding initial model_hpr 
 
         if shared_across_scenes:
             pass
@@ -47,6 +46,7 @@ class PBRNode(PBRShaderContext):
         self.buf_instances = self.instances_per_scene if self.shared_across else self.total_instances
         self.model_pivot_relative_point = model_pivot_relative_point
         self.model_scale = model_scale
+        self.model_hpr = model_hpr
         self.model_scale_units = model_scale_units
         
         # TODO: remove for now
@@ -61,6 +61,7 @@ class PBRNode(PBRShaderContext):
         if model_path:
             self.np = self.base.loader.loadModel(model_path)
             self._apply_model_scale()
+            self._apply_model_hpr()
             self.np.clearModelNodes(); self.np.flattenStrong()
             self.np.reparentTo(self.base.render) # NOTE: all nodes are children of the base render
             self.pivot_to_rel(self.model_pivot_relative_point)
@@ -199,6 +200,17 @@ class PBRNode(PBRShaderContext):
 
         raise TypeError("model_scale must be a number, a sequence of length 1 or 3, or None")
 
+    def _coerce_model_hpr(self) -> tuple[float, float, float] | None:
+        """Return coerced model HPR tuple."""
+        if self.model_hpr is None:
+            return None
+        if not isinstance(self.model_hpr, Sequence):
+            raise TypeError("model_hpr must be a sequence of length 3 or None")
+        hpr = tuple(float(v) for v in self.model_hpr)
+        if len(hpr) != 3:
+            raise ValueError("model_hpr sequence must have length 3")
+        return hpr
+
     def _apply_model_scale(self) -> None:
         if not getattr(self, 'has_geometry', True):
             # Nothing to scale
@@ -246,6 +258,14 @@ class PBRNode(PBRShaderContext):
                 denom = 1.0
             scale_components.append(target_dim / denom)
         self.np.setScale(*scale_components)
+
+    def _apply_model_hpr(self) -> None:
+        if not getattr(self, 'has_geometry', True):
+            return
+        model_hpr = self._coerce_model_hpr()
+        if model_hpr is None:
+            return
+        self.np.setHpr(*model_hpr)
 
     def _register_self(self) -> None:
         # Ensure registry exists and add this node once
@@ -319,5 +339,4 @@ class PBRNode(PBRShaderContext):
         tmp.flattenStrong()         # bake child transforms into vertices
         model.wrtReparentTo(parent)
         tmp.removeNode()
-
 
