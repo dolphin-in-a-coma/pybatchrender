@@ -64,10 +64,27 @@ class PacManEnv(PBREnv):
             discrete_actions=True,
         )
 
-        self.walkable = torch.zeros((self.H, self.W), dtype=torch.bool)
+        self.walkable = torch.zeros((self.H, self.W), dtype=torch.bool, device=self.device)
         for y in range(self.H):
             for x in range(self.W):
                 self.walkable[y, x] = self.layout.is_walkable(x, y)
+
+        self._walkable_offsets = torch.tensor(
+            [
+                (-self.actor_radius, -self.actor_radius),
+                (-self.actor_radius, self.actor_radius),
+                (self.actor_radius, -self.actor_radius),
+                (self.actor_radius, self.actor_radius),
+                (0.0, 0.0),
+            ],
+            dtype=torch.float32,
+            device=self.device,
+        )
+        self._ghost_moves = torch.tensor(
+            [[0.0, -self.ghost_step_size], [0.0, self.ghost_step_size], [-self.ghost_step_size, 0.0], [self.ghost_step_size, 0.0], [0.0, 0.0]],
+            dtype=torch.float32,
+            device=self.device,
+        )
 
         self.pellet_xy = torch.tensor(self.pellet_cells, dtype=torch.float32, device=self.device) if self.n_pellets else torch.zeros((0, 2), dtype=torch.float32, device=self.device)
         self.power_xy = torch.tensor(self.power_cells, dtype=torch.float32, device=self.device) if self.n_power else torch.zeros((0, 2), dtype=torch.float32, device=self.device)
@@ -116,27 +133,18 @@ class PacManEnv(PBREnv):
         return out
 
     def _is_pos_walkable(self, pos: torch.Tensor) -> torch.Tensor:
-        """Approximate circular actor collision vs wall cells."""
-        B = pos.shape[0]
-        out = torch.ones((B,), dtype=torch.bool, device=self.device)
-        r = self.actor_radius
-        offsets = [(-r, -r), (-r, r), (r, -r), (r, r), (0.0, 0.0)]
+        """Approximate circular actor collision vs wall cells (vectorized)."""
+        samples = pos.unsqueeze(1) + self._walkable_offsets.unsqueeze(0)  # [N, 5, 2]
+        sx = samples[..., 0]
+        sy = samples[..., 1]
 
-        for b in range(B):
-            x = float(pos[b, 0])
-            y = float(pos[b, 1])
-            ok = True
-            for ox, oy in offsets:
-                sx, sy = x + ox, y + oy
-                if sx < 0 or sx > self.W - 1 or sy < 0 or sy > self.H - 1:
-                    ok = False
-                    break
-                cx, cy = int(round(sx)), int(round(sy))
-                if not bool(self.walkable[cy, cx]):
-                    ok = False
-                    break
-            out[b] = ok
-        return out
+        in_bounds = (sx >= 0.0) & (sx <= (self.W - 1)) & (sy >= 0.0) & (sy <= (self.H - 1))
+
+        cx = torch.round(sx).long().clamp(0, self.W - 1)
+        cy = torch.round(sy).long().clamp(0, self.H - 1)
+        walkable = self.walkable[cy, cx]
+
+        return (in_bounds & walkable).all(dim=1)
 
     def _init_scene(self, mask: torch.Tensor | None = None):
         if mask is None:
@@ -205,21 +213,25 @@ class PacManEnv(PBREnv):
             self.pac_xy = self._snap_to_cells(self.pac_xy)
 
     def _move_ghosts(self):
-        s = self.ghost_step_size
-        moves = torch.tensor([[0.0, -s], [0.0, s], [-s, 0.0], [s, 0.0], [0.0, 0.0]], dtype=torch.float32, device=self.device)
         B = self.batch_size[0]
-        for b in range(B):
-            for g in range(self.num_ghosts):
-                cur = self.ghosts_xy[b, g].unsqueeze(0)
-                candidates = cur + moves
-                if self.bind_to_cells:
-                    candidates = self._snap_to_cells(candidates)
-                valid = self._is_pos_walkable(candidates)
-                valid_idx = torch.where(valid)[0]
-                if len(valid_idx) == 0:
-                    continue
-                k = valid_idx[torch.randint(0, len(valid_idx), (1,), generator=self.rng, device=self.device)][0]
-                self.ghosts_xy[b, g] = candidates[k]
+        BG = B * self.num_ghosts
+
+        cur = self.ghosts_xy.reshape(BG, 2)
+        candidates = cur.unsqueeze(1) + self._ghost_moves.unsqueeze(0)  # [BG, 5, 2]
+        if self.bind_to_cells:
+            candidates = self._snap_to_cells(candidates.reshape(-1, 2)).reshape(BG, 5, 2)
+
+        valid = self._is_pos_walkable(candidates.reshape(-1, 2)).reshape(BG, 5)
+        has_valid = valid.any(dim=1)
+
+        rand_scores = torch.rand((BG, 5), generator=self.rng, device=self.device)
+        rand_scores = rand_scores.masked_fill(~valid, -1.0)
+        choice = rand_scores.argmax(dim=1)
+
+        chosen = candidates[torch.arange(BG, device=self.device), choice]
+        next_pos = torch.where(has_valid.unsqueeze(-1), chosen, cur)
+
+        self.ghosts_xy = next_pos.reshape(B, self.num_ghosts, 2)
 
     def _collect_group(self, actor_xy: torch.Tensor, item_xy: torch.Tensor, alive: torch.Tensor) -> torch.Tensor:
         if item_xy.shape[0] == 0:
