@@ -92,6 +92,10 @@ class PacManRenderer(PBRRenderer):
         self._set_static_geometry()
         self._set_colors(num_scenes)
 
+        self._pellet_world = self._xy_list_to_world(torch.tensor(self.pellet_cells, dtype=torch.float32)) if len(self.pellet_cells) > 0 else None
+        self._power_world = self._xy_list_to_world(torch.tensor(self.power_cells, dtype=torch.float32)) if len(self.power_cells) > 0 else None
+        self._cherry_world = self._xy_list_to_world(torch.tensor(self.cherry_cells, dtype=torch.float32)) if len(self.cherry_cells) > 0 else None
+
         self.add_camera(fov_y_deg=38.0)
         cam_z = max(12.0, 0.85 * max(self.layout.width, self.layout.height))
         self._pbr_cam.set_positions(torch.tensor([0.0, -0.5, cam_z], dtype=torch.float32))
@@ -137,14 +141,11 @@ class PacManRenderer(PBRRenderer):
     def _xy_list_to_world(self, xy: torch.Tensor) -> torch.Tensor:
         if xy.dim() == 2:
             xy = xy.unsqueeze(1)
-        B, N, _ = xy.shape
-        out = torch.zeros((B, N, 3), dtype=torch.float32)
-        for b in range(B):
-            for n in range(N):
-                x, y = float(xy[b, n, 0]), float(xy[b, n, 1])
-                wx, wy = self._to_world_xy(x, y)
-                out[b, n] = torch.tensor([wx, wy, self.base_z], dtype=torch.float32)
-        return out
+        xy = xy.to(dtype=torch.float32)
+        wx = (xy[..., 0] - (self.layout.width - 1) / 2.0) * self.cell
+        wy = ((self.layout.height - 1) / 2.0 - xy[..., 1]) * self.cell
+        wz = torch.full_like(wx, self.base_z)
+        return torch.stack([wx, wy, wz], dim=-1)
 
     def _hide_by_mask(self, pos: torch.Tensor, alive_mask: torch.Tensor) -> torch.Tensor:
         if pos.shape[1] == 0:
@@ -157,27 +158,24 @@ class PacManRenderer(PBRRenderer):
         if state_batch is None:
             return
 
-        pac_xy = torch.as_tensor(state_batch["pac_xy"], dtype=torch.float32).detach().cpu()
-        ghosts_xy = torch.as_tensor(state_batch["ghosts_xy"], dtype=torch.float32).detach().cpu()
+        pac_xy = torch.as_tensor(state_batch["pac_xy"], dtype=torch.float32)
+        ghosts_xy = torch.as_tensor(state_batch["ghosts_xy"], dtype=torch.float32)
 
         B = int(self.cfg.num_scenes)
         self.pacman.set_positions(self._xy_list_to_world(pac_xy).reshape(B, 1, 3))
         self.ghosts.set_positions(self._xy_list_to_world(ghosts_xy))
 
         if len(self.pellet_cells) > 0:
-            pellet_xy = torch.as_tensor(state_batch["pellet_xy"], dtype=torch.float32).detach().cpu()
-            pellet_alive = torch.as_tensor(state_batch["pellet_alive"], dtype=torch.bool).detach().cpu()
-            pellet_pos = self._xy_list_to_world(pellet_xy.unsqueeze(0).repeat(B, 1, 1))
+            pellet_alive = torch.as_tensor(state_batch["pellet_alive"], dtype=torch.bool)
+            pellet_pos = self._pellet_world.expand(B, -1, -1).clone()
             self.pellets.set_positions(self._hide_by_mask(pellet_pos, pellet_alive))
 
         if len(self.power_cells) > 0:
-            power_xy = torch.as_tensor(state_batch["power_xy"], dtype=torch.float32).detach().cpu()
-            power_alive = torch.as_tensor(state_batch["power_alive"], dtype=torch.bool).detach().cpu()
-            power_pos = self._xy_list_to_world(power_xy.unsqueeze(0).repeat(B, 1, 1))
+            power_alive = torch.as_tensor(state_batch["power_alive"], dtype=torch.bool)
+            power_pos = self._power_world.expand(B, -1, -1).clone()
             self.power_pellets.set_positions(self._hide_by_mask(power_pos, power_alive))
 
         if len(self.cherry_cells) > 0:
-            cherry_xy = torch.as_tensor(state_batch["cherry_xy"], dtype=torch.float32).detach().cpu()
-            cherry_alive = torch.as_tensor(state_batch["cherry_alive"], dtype=torch.bool).detach().cpu()
-            cherry_pos = self._xy_list_to_world(cherry_xy.unsqueeze(0).repeat(B, 1, 1))
+            cherry_alive = torch.as_tensor(state_batch["cherry_alive"], dtype=torch.bool)
+            cherry_pos = self._cherry_world.expand(B, -1, -1).clone()
             self.cherries.set_positions(self._hide_by_mask(cherry_pos, cherry_alive))
