@@ -5,7 +5,7 @@ import torch
 
 from ...config import PBRConfig
 from ...renderer.renderer import PBRRenderer
-from ..atari_style import light_kwargs, topdown_camera_pose, use_2d
+from ..atari_style import add_sprite_node, light_kwargs, topdown_camera_pose, use_2d
 
 
 class AsteroidsRenderer(PBRRenderer):
@@ -17,21 +17,18 @@ class AsteroidsRenderer(PBRRenderer):
 
         if flat_2d:
             self.setBackgroundColor(0.0, 0.0, 0.0, 1.0)
-            ship_scale = (0.10, 0.10, 0.02)
-            ast_scale = (0.10, 0.10, 0.02)
+            self.ship = add_sprite_node(self, texture="asteroid_ship.png", instances_per_scene=1, scale_xy=(0.10, 0.10))
+            self.asts = add_sprite_node(self, texture="asteroid_rock.png", instances_per_scene=self.n_ast, scale_xy=(0.10, 0.10))
         else:
-            ship_scale = (0.10, 0.10, 0.06)
-            ast_scale = (0.10, 0.10, 0.08)
-
-        self.ship = self.add_node("models/box", model_pivot_relative_point=(0.5, 0.5, 0.5), model_scale=ship_scale, instances_per_scene=1, shared_across_scenes=False)
-        self.asts = self.add_node("models/smiley", model_scale=ast_scale, model_scale_units="absolute", instances_per_scene=self.n_ast, shared_across_scenes=False)
+            self.ship = self.add_node("models/box", model_pivot_relative_point=(0.5, 0.5, 0.5), model_scale=(0.10, 0.10, 0.06), instances_per_scene=1, shared_across_scenes=False)
+            self.asts = self.add_node("models/smiley", model_scale=(0.10, 0.10, 0.08), model_scale_units="absolute", instances_per_scene=self.n_ast, shared_across_scenes=False)
 
         self.ship_pos = torch.zeros((n, 1, 3), dtype=torch.float32)
         self.ast_pos = torch.zeros((n, self.n_ast, 3), dtype=torch.float32)
         self.ship_pos[:, :, 2] = 0.05
         self.ast_pos[:, :, 2] = 0.05
-        self.ship.set_colors(torch.tensor([[[0.6, 1.0, 0.9, 1.0]]], dtype=torch.float32).repeat(n, 1, 1))
-        self.asts.set_colors(torch.tensor([[[0.8, 0.8, 0.8, 1.0]]], dtype=torch.float32).repeat(n, self.n_ast, 1))
+        self.ship.set_colors(torch.tensor([[[1.0, 1.0, 1.0, 1.0]]], dtype=torch.float32).repeat(n, 1, 1))
+        self.asts.set_colors(torch.tensor([[[1.0, 1.0, 1.0, 1.0]]], dtype=torch.float32).repeat(n, self.n_ast, 1))
 
         cam_pos, cam_look, cam_fov = topdown_camera_pose(arena_extent=1.8)
         self.add_camera(fov_y_deg=cam_fov)

@@ -8,6 +8,7 @@ out vec4 p3d_FragColor;
 
 uniform sampler2D p3d_Texture0;
 uniform float useTexture;        // 0 = no texture, 1 = sample
+uniform float useTextureAlpha;   // 0 = ignore texture alpha, 1 = multiply alpha
 
 uniform samplerBuffer tilebuf;   // (K)   per-view tile (u0,u1,v0,v1)
 uniform vec2 screenSize;         // (width, height) in pixels
@@ -28,14 +29,16 @@ void main(){
         discard;
     }
 
-    vec3 tex = texture(p3d_Texture0, v_uv).rgb;
+    vec4 texel = texture(p3d_Texture0, v_uv);
+    vec3 tex = texel.rgb;
     vec3 base = mix(vec3(1.0), tex, clamp(useTexture,0.0,1.0));
     vec3 n = normalize(v_normal);
     float ndl = max(dot(n, normalize(dirLightDir)), 0.0);
     vec3 light = ambientCol + ndl*dirLightCol;
     vec3 l = mix(vec3(1.0), light, clamp(lightingStrength,0.0,1.0));
     vec3 col = base * v_color.rgb * l;
-    p3d_FragColor = vec4(col, v_color.a);
+    float a = v_color.a * mix(1.0, texel.a, clamp(useTextureAlpha, 0.0, 1.0));
+    p3d_FragColor = vec4(col, a);
 }
 
 

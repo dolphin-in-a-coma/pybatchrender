@@ -3,7 +3,7 @@ import torch
 from collections.abc import Sequence
 from typing import Literal
 
-from panda3d.core import Texture, OmniBoundingVolume, NodePath
+from panda3d.core import Texture, OmniBoundingVolume, NodePath, TransparencyAttrib
 from direct.showbase.ShowBase import ShowBase
 
 from .shader_context import PBRShaderContext
@@ -27,7 +27,12 @@ class PBRNode(PBRShaderContext):
                 backend: Literal[ "loop", "instanced"] = "instanced",
                 shared_across_scenes: bool = False,
                 parent: 'PBRNode | NodePath | None' = None, # NOTE: parent is not fully functional yet
-                name: str | None = None
+                name: str | None = None,
+                sprite_transparency: bool = False,
+                depth_write: bool | None = None,
+                depth_test: bool | None = None,
+                bin_name: str | None = None,
+                bin_sort: int = 0,
                 ) -> None:
 
         if shared_across_scenes:
@@ -48,6 +53,11 @@ class PBRNode(PBRShaderContext):
         self.model_scale = model_scale
         self.model_hpr = model_hpr
         self.model_scale_units = model_scale_units
+        self.sprite_transparency = bool(sprite_transparency)
+        self.depth_write = depth_write
+        self.depth_test = depth_test
+        self.bin_name = bin_name
+        self.bin_sort = int(bin_sort)
         
         # TODO: remove for now
         # parent_np = None
@@ -69,6 +79,7 @@ class PBRNode(PBRShaderContext):
             self.np.setShader(self._make_shader()) # TODO: implement CUDA way too with CUDA specific shaders
             self.np.node().setBounds(OmniBoundingVolume())
             self.np.node().setFinal(True)
+            self._apply_render_style()
             self.has_geometry = True
         else:
             # Create an empty transform node, NOTE: empty nodes are not fully supported yet
@@ -93,6 +104,7 @@ class PBRNode(PBRShaderContext):
         # defaults (safe to broadcast even for empty nodes)
         self._set_lighting_strength(0.0)
         self._set_lighting(dir_dir=(0.4,0.6,0.7), dir_col=(1,1,1), amb_col=(0.2,0.2,0.25))
+        self._set_shader_input('useTextureAlpha', 0.0)
         self.set_texture(texture)
 
         # init identity mats and white color
@@ -267,6 +279,16 @@ class PBRNode(PBRShaderContext):
             return
         self.np.setHpr(*model_hpr)
 
+    def _apply_render_style(self) -> None:
+        if self.sprite_transparency:
+            self.np.setTransparency(TransparencyAttrib.M_alpha)
+        if self.depth_write is not None:
+            self.np.setDepthWrite(bool(self.depth_write))
+        if self.depth_test is not None:
+            self.np.setDepthTest(bool(self.depth_test))
+        if self.bin_name is not None:
+            self.np.setBin(str(self.bin_name), int(self.bin_sort))
+
     def _register_self(self) -> None:
         # Ensure registry exists and add this node once
         if not hasattr(self.base, '_pbr_nodes'):
@@ -276,15 +298,19 @@ class PBRNode(PBRShaderContext):
 
     def set_texture(self, texture: Texture | str | bool | None = None
     ) -> None:
-        if texture is not None:
-            if isinstance(texture, str):
-                texture = self.base.loader.loadTexture(texture)
-                self.np.setTexture(texture)
-            elif isinstance(texture, Texture):
-                self.np.setTexture(texture)
-            self._set_shader_input('useTexture', 1.0) # NOTE: if True, default texture is attempted
-        else:
+        if texture is False or texture is None:
             self._set_shader_input('useTexture', 0.0)
+            return
+
+        if isinstance(texture, str):
+            texture = self.base.loader.loadTexture(texture)
+        if isinstance(texture, Texture):
+            self.np.setTexture(texture)
+            self._set_shader_input('useTexture', 1.0)
+            self._set_shader_input('useTextureAlpha', 1.0)
+            return
+
+        self._set_shader_input('useTexture', 1.0) # NOTE: if True, default texture is attempted
 
     def reparent_to(self, parent: 'PBRNode | NodePath') -> None:
         raise NotImplementedError("PBRNode.reparent_to is not implemented yet")

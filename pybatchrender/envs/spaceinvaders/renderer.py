@@ -5,7 +5,7 @@ import torch
 
 from ...config import PBRConfig
 from ...renderer.renderer import PBRRenderer
-from ..atari_style import light_kwargs, topdown_camera_pose, use_2d
+from ..atari_style import add_sprite_node, light_kwargs, topdown_camera_pose, use_2d
 
 
 class SpaceInvadersRenderer(PBRRenderer):
@@ -19,17 +19,13 @@ class SpaceInvadersRenderer(PBRRenderer):
 
         if flat_2d:
             self.setBackgroundColor(0.0, 0.0, 0.0, 1.0)
-            player_scale = (0.20, 0.08, 0.02)
-            bullet_scale = (0.02, 0.06, 0.02)
-            inv_scale = (0.12, 0.08, 0.02)
+            self.player = add_sprite_node(self, texture="invader_player.png", instances_per_scene=1, scale_xy=(0.20, 0.08))
+            self.bullet = add_sprite_node(self, texture="invader_bullet.png", instances_per_scene=1, scale_xy=(0.02, 0.06))
+            self.invaders = add_sprite_node(self, texture="invader_enemy.png", instances_per_scene=self.n_inv, scale_xy=(0.12, 0.08))
         else:
-            player_scale = (0.20, 0.08, 0.06)
-            bullet_scale = (0.02, 0.06, 0.03)
-            inv_scale = (0.12, 0.08, 0.05)
-
-        self.player = self.add_node("models/box", model_pivot_relative_point=(0.5, 0.5, 0.5), model_scale=player_scale, instances_per_scene=1, shared_across_scenes=False)
-        self.bullet = self.add_node("models/box", model_pivot_relative_point=(0.5, 0.5, 0.5), model_scale=bullet_scale, instances_per_scene=1, shared_across_scenes=False)
-        self.invaders = self.add_node("models/box", model_pivot_relative_point=(0.5, 0.5, 0.5), model_scale=inv_scale, instances_per_scene=self.n_inv, shared_across_scenes=False)
+            self.player = self.add_node("models/box", model_pivot_relative_point=(0.5, 0.5, 0.5), model_scale=(0.20, 0.08, 0.06), instances_per_scene=1, shared_across_scenes=False)
+            self.bullet = self.add_node("models/box", model_pivot_relative_point=(0.5, 0.5, 0.5), model_scale=(0.02, 0.06, 0.03), instances_per_scene=1, shared_across_scenes=False)
+            self.invaders = self.add_node("models/box", model_pivot_relative_point=(0.5, 0.5, 0.5), model_scale=(0.12, 0.08, 0.05), instances_per_scene=self.n_inv, shared_across_scenes=False)
 
         self.player_pos = torch.zeros((n, 1, 3), dtype=torch.float32)
         self.bullet_pos = torch.zeros((n, 1, 3), dtype=torch.float32)
@@ -43,9 +39,9 @@ class SpaceInvadersRenderer(PBRRenderer):
                 self.inv_base[:, i, 0] = -0.7 + c * (1.4 / max(1, self.cols - 1))
                 self.inv_base[:, i, 1] = 0.75 - r * 0.18
 
-        self.player.set_colors(torch.tensor([[[0.3, 1.0, 0.3, 1.0]]], dtype=torch.float32).repeat(n, 1, 1))
+        self.player.set_colors(torch.tensor([[[1.0, 1.0, 1.0, 1.0]]], dtype=torch.float32).repeat(n, 1, 1))
         self.bullet.set_colors(torch.tensor([[[1.0, 1.0, 1.0, 1.0]]], dtype=torch.float32).repeat(n, 1, 1))
-        self.invaders.set_colors(torch.tensor([[[1.0, 0.2, 0.2, 1.0]]], dtype=torch.float32).repeat(n, self.n_inv, 1))
+        self.invaders.set_colors(torch.tensor([[[1.0, 1.0, 1.0, 1.0]]], dtype=torch.float32).repeat(n, self.n_inv, 1))
 
         cam_pos, cam_look, cam_fov = topdown_camera_pose(arena_extent=1.8)
         self.add_camera(fov_y_deg=cam_fov)

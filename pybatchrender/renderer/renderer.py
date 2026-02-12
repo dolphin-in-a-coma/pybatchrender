@@ -109,6 +109,11 @@ class PBRRenderer(ShowBase):
             shared_across_scenes: bool = False,
             parent: 'PBRNode | None' = None,
             name: str | None = None,
+            sprite_transparency: bool = False,
+            depth_write: bool | None = None,
+            depth_test: bool | None = None,
+            bin_name: str | None = None,
+            bin_sort: int = 0,
             ) -> PBRNode:
         node = PBRNode(self, model_path=model_path, 
                         num_scenes=self.num_scenes,
@@ -125,7 +130,12 @@ class PBRRenderer(ShowBase):
                         backend=backend,
                         shared_across_scenes=shared_across_scenes,
                         parent=parent,
-                        name=name)
+                        name=name,
+                        sprite_transparency=sprite_transparency,
+                        depth_write=depth_write,
+                        depth_test=depth_test,
+                        bin_name=bin_name,
+                        bin_sort=bin_sort)
         return node
 
     def add_camera(self,

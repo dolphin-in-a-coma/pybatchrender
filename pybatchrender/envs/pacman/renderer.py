@@ -5,6 +5,7 @@ import torch
 
 from ...config import PBRConfig
 from ...renderer.renderer import PBRRenderer
+from ..atari_style import add_sprite_node, plane_model_path, sprite_path, use_2d
 from .layout import build_spec
 
 
@@ -19,75 +20,31 @@ class PacManRenderer(PBRRenderer):
         self.cherry_cells = self.spec["cherry_cells"]
 
         self.setBackgroundColor(0.03, 0.08, 0.9, 1.0)
-
         self.cell = 1.0
         self.base_z = 0.15
+        self.flat_2d = use_2d(self.cfg)
 
         self.wall_cells = sorted(list(self.layout.walls), key=lambda p: (p[1], p[0]))
         self.track_cells = self.layout.walkable
         self.num_ghosts = int(self.cfg.num_ghosts)
-
         num_scenes = int(self.cfg.num_scenes)
 
-        self.walls = self.add_node(
-            "models/box",
-            model_pivot_relative_point=(0.5, 0.5, 0.5),
-            model_scale=(0.96, 0.96, 0.24),
-            instances_per_scene=max(1, len(self.wall_cells)),
-            shared_across_scenes=True,
-        )
-        self.tracks = self.add_node(
-            "models/box",
-            model_pivot_relative_point=(0.5, 0.5, 0.5),
-            model_scale=(0.96, 0.96, 0.04),
-            instances_per_scene=max(1, len(self.track_cells)),
-            shared_across_scenes=True,
-        )
-
-        actor_shape = str(getattr(self.cfg, "actor_shape", "circle")).lower()
-        actor_model = "models/box" if actor_shape == "square" else "models/smiley"
-        actor_pivot = (0.5, 0.5, 0.5) if actor_shape == "square" else None
-        actor_scale = (0.56, 0.56, 0.12) if actor_shape == "square" else (0.56, 0.56, 0.11)
-        ghost_scale = (0.52, 0.52, 0.11) if actor_shape == "square" else (0.52, 0.52, 0.1)
-
-        self.pacman = self.add_node(
-            actor_model,
-            model_pivot_relative_point=actor_pivot,
-            model_scale=actor_scale,
-            model_scale_units="absolute",
-            instances_per_scene=1,
-            shared_across_scenes=False,
-        )
-        self.ghosts = self.add_node(
-            actor_model,
-            model_pivot_relative_point=actor_pivot,
-            model_scale=ghost_scale,
-            model_scale_units="absolute",
-            instances_per_scene=max(1, self.num_ghosts),
-            shared_across_scenes=False,
-        )
-
-        self.pellets = self.add_node(
-            "models/smiley",
-            model_scale=(0.14, 0.14, 0.05),
-            model_scale_units="absolute",
-            instances_per_scene=max(1, len(self.pellet_cells)),
-            shared_across_scenes=False,
-        )
-        self.power_pellets = self.add_node(
-            "models/smiley",
-            model_scale=(0.30, 0.30, 0.07),
-            model_scale_units="absolute",
-            instances_per_scene=max(1, len(self.power_cells)),
-            shared_across_scenes=False,
-        )
-        self.cherries = self.add_node(
-            "models/smiley",
-            model_scale=(0.24, 0.24, 0.07),
-            model_scale_units="absolute",
-            instances_per_scene=max(1, len(self.cherry_cells)),
-            shared_across_scenes=False,
-        )
+        if self.flat_2d:
+            self.walls = self.add_node(plane_model_path(), texture=sprite_path("wall_blue.png"), model_scale=(0.96, 0.96, 0.02), model_scale_units="absolute", model_hpr=(0.0, -90.0, 0.0), instances_per_scene=max(1, len(self.wall_cells)), shared_across_scenes=True)
+            self.tracks = self.add_node(plane_model_path(), texture=sprite_path("track_dark.png"), model_scale=(0.96, 0.96, 0.02), model_scale_units="absolute", model_hpr=(0.0, -90.0, 0.0), instances_per_scene=max(1, len(self.track_cells)), shared_across_scenes=True)
+            self.pacman = add_sprite_node(self, texture="pacman.png", instances_per_scene=1, scale_xy=(0.64, 0.64), z=0.02)
+            self.ghosts = self.add_node(plane_model_path(), texture=sprite_path("ghost_red.png"), model_scale=(0.58, 0.58, 0.02), model_scale_units="absolute", model_hpr=(0.0, -90.0, 0.0), instances_per_scene=max(1, self.num_ghosts), shared_across_scenes=False, sprite_transparency=True, depth_write=False, depth_test=True, bin_name="transparent", bin_sort=12)
+            self.pellets = add_sprite_node(self, texture="pellet.png", instances_per_scene=max(1, len(self.pellet_cells)), scale_xy=(0.14, 0.14), z=0.02)
+            self.power_pellets = add_sprite_node(self, texture="power_pellet.png", instances_per_scene=max(1, len(self.power_cells)), scale_xy=(0.30, 0.30), z=0.02)
+            self.cherries = add_sprite_node(self, texture="cherry.png", instances_per_scene=max(1, len(self.cherry_cells)), scale_xy=(0.28, 0.28), z=0.02)
+        else:
+            self.walls = self.add_node("models/box", model_pivot_relative_point=(0.5, 0.5, 0.5), model_scale=(0.96, 0.96, 0.24), instances_per_scene=max(1, len(self.wall_cells)), shared_across_scenes=True)
+            self.tracks = self.add_node("models/box", model_pivot_relative_point=(0.5, 0.5, 0.5), model_scale=(0.96, 0.96, 0.04), instances_per_scene=max(1, len(self.track_cells)), shared_across_scenes=True)
+            self.pacman = self.add_node("models/smiley", model_scale=(0.56, 0.56, 0.11), model_scale_units="absolute", instances_per_scene=1, shared_across_scenes=False)
+            self.ghosts = self.add_node("models/smiley", model_scale=(0.52, 0.52, 0.10), model_scale_units="absolute", instances_per_scene=max(1, self.num_ghosts), shared_across_scenes=False)
+            self.pellets = self.add_node("models/smiley", model_scale=(0.14, 0.14, 0.05), model_scale_units="absolute", instances_per_scene=max(1, len(self.pellet_cells)), shared_across_scenes=False)
+            self.power_pellets = self.add_node("models/smiley", model_scale=(0.30, 0.30, 0.07), model_scale_units="absolute", instances_per_scene=max(1, len(self.power_cells)), shared_across_scenes=False)
+            self.cherries = self.add_node("models/smiley", model_scale=(0.24, 0.24, 0.07), model_scale_units="absolute", instances_per_scene=max(1, len(self.cherry_cells)), shared_across_scenes=False)
 
         self._set_static_geometry()
         self._set_colors(num_scenes)
@@ -109,19 +66,17 @@ class PacManRenderer(PBRRenderer):
         for i, (x, y) in enumerate(self.wall_cells):
             wall_pos[0, i] = torch.tensor([*self._to_world_xy(float(x), float(y)), 0.0])
         self.walls.set_positions(wall_pos)
-        self.walls.set_colors(torch.tensor([[[0.05, 0.15, 1.0, 1.0]]], dtype=torch.float32).repeat(1, max(1, len(self.wall_cells)), 1))
 
         track_pos = torch.zeros((1, max(1, len(self.track_cells)), 3), dtype=torch.float32)
         for i, (x, y) in enumerate(self.track_cells):
             track_pos[0, i] = torch.tensor([*self._to_world_xy(float(x), float(y)), -0.02])
         self.tracks.set_positions(track_pos)
-        self.tracks.set_colors(torch.tensor([[[0.0, 0.0, 0.0, 1.0]]], dtype=torch.float32).repeat(1, max(1, len(self.track_cells)), 1))
 
     def _set_colors(self, num_scenes: int):
-        self.pacman.set_colors(torch.tensor([[[1.0, 0.9, 0.05, 1.0]]], dtype=torch.float32).repeat(num_scenes, 1, 1))
+        self.pacman.set_colors(torch.tensor([[[1.0, 1.0, 1.0, 1.0]]], dtype=torch.float32).repeat(num_scenes, 1, 1))
 
         base_cols = torch.tensor(
-            [[1.0, 0.25, 0.25, 1.0], [1.0, 0.5, 0.9, 1.0], [0.2, 1.0, 1.0, 1.0], [1.0, 0.7, 0.05, 1.0]],
+            [[1.0, 1.0, 1.0, 1.0], [1.0, 0.85, 0.95, 1.0], [0.9, 1.0, 1.0, 1.0], [1.0, 0.9, 0.8, 1.0]],
             dtype=torch.float32,
         )
         ghost_cols = torch.zeros((num_scenes, max(1, self.num_ghosts), 4), dtype=torch.float32)
@@ -129,9 +84,11 @@ class PacManRenderer(PBRRenderer):
             ghost_cols[:, g, :] = base_cols[g % base_cols.shape[0]]
         self.ghosts.set_colors(ghost_cols)
 
+        self.walls.set_colors(torch.tensor([[[1.0, 1.0, 1.0, 1.0]]], dtype=torch.float32).repeat(1, max(1, len(self.wall_cells)), 1))
+        self.tracks.set_colors(torch.tensor([[[1.0, 1.0, 1.0, 1.0]]], dtype=torch.float32).repeat(1, max(1, len(self.track_cells)), 1))
         self.pellets.set_colors(torch.tensor([[[1.0, 1.0, 1.0, 1.0]]], dtype=torch.float32).repeat(num_scenes, max(1, len(self.pellet_cells)), 1))
         self.power_pellets.set_colors(torch.tensor([[[1.0, 1.0, 1.0, 1.0]]], dtype=torch.float32).repeat(num_scenes, max(1, len(self.power_cells)), 1))
-        self.cherries.set_colors(torch.tensor([[[1.0, 0.1, 0.1, 1.0]]], dtype=torch.float32).repeat(num_scenes, max(1, len(self.cherry_cells)), 1))
+        self.cherries.set_colors(torch.tensor([[[1.0, 1.0, 1.0, 1.0]]], dtype=torch.float32).repeat(num_scenes, max(1, len(self.cherry_cells)), 1))
 
     def _to_world_xy(self, x: float, y: float) -> tuple[float, float]:
         cx = x - (self.layout.width - 1) / 2.0

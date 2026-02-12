@@ -5,7 +5,7 @@ import torch
 
 from ...config import PBRConfig
 from ...renderer.renderer import PBRRenderer
-from ..atari_style import light_kwargs, topdown_camera_pose, use_2d
+from ..atari_style import add_sprite_node, light_kwargs, topdown_camera_pose, use_2d
 
 
 class BreakoutRenderer(PBRRenderer):
@@ -19,17 +19,13 @@ class BreakoutRenderer(PBRRenderer):
 
         if flat_2d:
             self.setBackgroundColor(0.0, 0.0, 0.0, 1.0)
-            paddle_scale = (0.35, 0.08, 0.02)
-            ball_scale = (0.08, 0.08, 0.02)
-            brick_scale = (0.22, 0.10, 0.02)
+            self.paddle = add_sprite_node(self, texture="breakout_paddle.png", instances_per_scene=1, scale_xy=(0.35, 0.08))
+            self.ball = add_sprite_node(self, texture="breakout_ball.png", instances_per_scene=1, scale_xy=(0.08, 0.08))
+            self.bricks = add_sprite_node(self, texture="breakout_brick.png", instances_per_scene=self.n_bricks, scale_xy=(0.22, 0.10))
         else:
-            paddle_scale = (0.35, 0.08, 0.06)
-            ball_scale = (0.08, 0.08, 0.08)
-            brick_scale = (0.22, 0.10, 0.05)
-
-        self.paddle = self.add_node("models/box", model_pivot_relative_point=(0.5, 0.5, 0.5), model_scale=paddle_scale, instances_per_scene=1, shared_across_scenes=False)
-        self.ball = self.add_node("models/smiley", model_scale=ball_scale, model_scale_units="absolute", instances_per_scene=1, shared_across_scenes=False)
-        self.bricks = self.add_node("models/box", model_pivot_relative_point=(0.5, 0.5, 0.5), model_scale=brick_scale, instances_per_scene=self.n_bricks, shared_across_scenes=False)
+            self.paddle = self.add_node("models/box", model_pivot_relative_point=(0.5, 0.5, 0.5), model_scale=(0.35, 0.08, 0.06), instances_per_scene=1, shared_across_scenes=False)
+            self.ball = self.add_node("models/smiley", model_scale=(0.08, 0.08, 0.08), model_scale_units="absolute", instances_per_scene=1, shared_across_scenes=False)
+            self.bricks = self.add_node("models/box", model_pivot_relative_point=(0.5, 0.5, 0.5), model_scale=(0.22, 0.10, 0.05), instances_per_scene=self.n_bricks, shared_across_scenes=False)
 
         self.paddle_pos = torch.zeros((n, 1, 3), dtype=torch.float32)
         self.ball_pos = torch.zeros((n, 1, 3), dtype=torch.float32)
@@ -44,12 +40,12 @@ class BreakoutRenderer(PBRRenderer):
                 self.brick_pos[:, i, 1] = 0.35 + r * 0.18
         self.bricks.set_positions(self.brick_pos)
 
-        self.paddle.set_colors(torch.tensor([[[0.9, 0.9, 0.2, 1.0]]], dtype=torch.float32).repeat(n, 1, 1))
+        self.paddle.set_colors(torch.tensor([[[1.0, 1.0, 1.0, 1.0]]], dtype=torch.float32).repeat(n, 1, 1))
         self.ball.set_colors(torch.tensor([[[1.0, 1.0, 1.0, 1.0]]], dtype=torch.float32).repeat(n, 1, 1))
         self._brick_colors = torch.zeros((n, self.n_bricks, 4), dtype=torch.float32)
         self._brick_colors[:, :, 3] = 1.0
         for i in range(self.n_bricks):
-            self._brick_colors[:, i, :3] = torch.tensor([0.2 + (i % self.cols) / max(1, self.cols), 0.4, 1.0 - (i % self.cols) / max(1, self.cols)])
+            self._brick_colors[:, i, :3] = torch.tensor([0.6 + 0.4 * (i % self.cols) / max(1, self.cols), 0.8, 1.0])
         self.bricks.set_colors(self._brick_colors)
 
         cam_pos, cam_look, cam_fov = topdown_camera_pose(arena_extent=1.7)

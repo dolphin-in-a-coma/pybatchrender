@@ -68,6 +68,7 @@ pybatchrender = [
   "shaders/*.frag",
   "shaders/*.vert",
   "models/**/*",
+  "assets/**/*",
 ]
 
 # Entry points for environment plugins
