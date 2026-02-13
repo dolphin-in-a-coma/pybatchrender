@@ -73,5 +73,37 @@ img_batch = renderer.step(return_pixels=True)
 print(img_batch.shape)  # torch.Size([4, 3, 64, 64])
 ```
 
-### License
+## Automation
+
+### GitHub Actions (CPU CI)
+
+Workflow file: `.github/workflows/ci.yml`
+
+Runs on pushes/PRs and performs:
+- install (CPU torch)
+- import+compile checks
+- small CPU rendering smoke benchmark
+- CPU frame regression check against `clawding/tests/ref_frames_ci_cpu/`
+
+### Puhti GPU tests (submit from GitHub)
+
+Workflow file: `.github/workflows/puhti-submit.yml`
+
+How to run:
+1) In GitHub repo UI, go to **Actions**.
+2) Select workflow **“Puhti GPU submit”**.
+3) Click **Run workflow**.
+
+Notes:
+- GitHub only shows **manual Run workflow** if the workflow file exists on the repo’s **default branch**.
+  If your default branch is `main` but workflows live on `clawding`, merge `clawding` → `main` (or change default branch).
+- Requires repository secrets: `PUHTI_HOST`, `PUHTI_USER`, `PUHTI_SSH_KEY`.
+
+### Puhti GPU tests (nightly on Puhti)
+
+Script: `scripts/puhti_nightly.sh`
+
+Run it from Puhti login node (e.g. cron) to submit and summarize nightly GPU tests.
+
+## License
 MIT
