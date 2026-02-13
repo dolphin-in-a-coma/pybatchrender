@@ -44,18 +44,30 @@ ensure_venv() {
   # shellcheck disable=SC1090
   source "$VENV/bin/activate"
 
-  python - <<'PY' || NEED_DEPS=1
+  python - <<'PY' || NEED_RENDER_DEPS=1
 import panda3d
 print('panda3d ok:', panda3d.__version__)
 PY
 
-  if [[ "${NEED_DEPS:-0}" == "1" ]]; then
+  python - <<'PY' || NEED_RL_DEPS=1
+import tensordict, torchrl
+print('tensordict ok:', tensordict.__version__)
+print('torchrl ok:', torchrl.__version__)
+PY
+
+  pip install -U pip
+
+  if [[ "${NEED_RENDER_DEPS:-0}" == "1" ]]; then
     echo "Installing renderer deps into venv (panda3d + optional cuda extras)..."
-    pip install -U pip
     pip install 'panda3d>=1.10.13'
 
     # Optional CUDA interop deps (can be heavy; keep enabled because tests request CUDA path)
     pip install 'cuda-python>=12,<12.9' 'cupy-cuda12x>=12' 'PyOpenGL>=3.1'
+  fi
+
+  if [[ "${NEED_RL_DEPS:-0}" == "1" ]]; then
+    echo "Installing RL deps into venv (tensordict + torchrl; torch comes from module)..."
+    pip install 'tensordict>=0.5' 'torchrl>=0.5'
   fi
 
   echo "Installing pybatchrender editable (no deps)..."
