@@ -1,0 +1,68 @@
+name: Puhti GPU submit
+
+on:
+  workflow_dispatch:
+    inputs:
+      account:
+        description: "CSC project/account (e.g. project_2013820)"
+        required: true
+        default: "project_2013820"
+      branch:
+        description: "Branch to test on Puhti"
+        required: true
+        default: "clawding"
+      base:
+        description: "Scratch base dir on Puhti (e.g. /scratch/project_2013820/evgeruda)"
+        required: true
+        default: "/scratch/project_2013820/evgeruda"
+
+jobs:
+  submit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout (for logs only)
+        uses: actions/checkout@v4
+
+      - name: Submit Puhti jobs via SSH
+        shell: bash
+        env:
+          PUHTI_HOST: ${{ secrets.PUHTI_HOST }}
+          PUHTI_USER: ${{ secrets.PUHTI_USER }}
+          PUHTI_SSH_KEY: ${{ secrets.PUHTI_SSH_KEY }}
+          ACCOUNT: ${{ inputs.account }}
+          BRANCH: ${{ inputs.branch }}
+          BASE: ${{ inputs.base }}
+        run: |
+          if [[ -z "${PUHTI_HOST}" || -z "${PUHTI_USER}" || -z "${PUHTI_SSH_KEY}" ]]; then
+            echo "Missing secrets. Please set repository secrets: PUHTI_HOST, PUHTI_USER, PUHTI_SSH_KEY" >&2
+            exit 1
+          fi
+
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          printf '%s\n' "$PUHTI_SSH_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+
+          # Preload host key
+          ssh-keyscan -t ed25519 "$PUHTI_HOST" >> ~/.ssh/known_hosts
+
+          # Run remote submit
+          ssh -i ~/.ssh/id_ed25519 -o BatchMode=yes "$PUHTI_USER@$PUHTI_HOST" bash -lc "
+            set -euo pipefail
+            source /appl/profile/zz-csc-env.sh
+            module purge
+            cd '$BASE/src/pybatchrender'
+            git fetch --all
+            git checkout '$BRANCH'
+            git pull --ff-only
+            RESULTS_DIR='$BASE/test_results/gh_$(date +%Y%m%d_%H%M%S)'
+            mkdir -p \"$RESULTS_DIR\"
+            RESULTS_DIR=\"$RESULTS_DIR\" ACCOUNT='$ACCOUNT' USER_NAME='$PUHTI_USER' BASE='$BASE' bash ./scripts/submit_puhti_gpu_tests.sh
+            echo \"Results dir: $RESULTS_DIR\"
+          "
+
+      - name: Notes
+        run: |
+          echo "This workflow only submits jobs. For results, check the printed Results dir on Puhti." 
