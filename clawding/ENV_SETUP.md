@@ -76,7 +76,7 @@ Only do this if machine has an NVIDIA GPU + drivers. Otherwise stick to CPU-only
 
 ### Puhti (CSC) recommended setup (no sudo)
 
-On Puhti, **prefer modules** (fast, supported) instead of trying to install system packages.
+On Puhti, **prefer modules** (fast, supported) instead of trying to install system packages or CUDA wheels.
 
 In SLURM jobs and non-interactive shells you should initialize the module environment explicitly:
 
@@ -87,6 +87,20 @@ module load pytorch/2.7
 ```
 
 This provides a working Python + CUDA-enabled PyTorch stack on V100 nodes.
+
+#### Strong recommendation: use `/scratch` (avoid home quota)
+
+Install caches and venvs to `/scratch/project_XXXXXXX/<user>/...`.
+Example layout (Puhti):
+
+```bash
+BASE=/scratch/project_2013820/evgeruda
+mkdir -p $BASE/{src,venvs,pip-cache,tmp,outputs}
+export PIP_CACHE_DIR=$BASE/pip-cache
+export TMPDIR=$BASE/tmp
+```
+
+Also: compute nodes may not have `git` → clone/update the repo on the **login node** first.
 
 #### Minimal sanity checks
 
@@ -136,6 +150,53 @@ PY
 ```
 
 Expected on a V100 node: `Pipe: eglGraphicsPipe` and `Renderer: Tesla V100-...`.
+
+#### pybatchrender on Puhti GPU nodes (recommended recipe)
+
+Use module-provided `torch` + install `pybatchrender` editable with `--system-site-packages` venv:
+
+**On login node (once):**
+```bash
+source /appl/profile/zz-csc-env.sh
+module purge
+module load pytorch/2.7
+
+BASE=/scratch/project_2013820/evgeruda
+mkdir -p $BASE/{src,venvs,pip-cache,tmp,outputs}
+export PIP_CACHE_DIR=$BASE/pip-cache
+export TMPDIR=$BASE/tmp
+
+# Clone repo (branch clawding)
+if [ ! -d $BASE/src/pybatchrender/.git ]; then
+  git clone -b clawding https://github.com/dolphin-in-a-coma/pybatchrender.git $BASE/src/pybatchrender
+else
+  cd $BASE/src/pybatchrender && git fetch --all && git checkout clawding && git pull --ff-only
+fi
+
+# Create venv that can see module packages
+python -m venv --system-site-packages $BASE/venvs/pybatchrender-pt27
+source $BASE/venvs/pybatchrender-pt27/bin/activate
+pip install -U pip
+
+# Install pybatchrender itself (avoid pulling a different torch)
+cd $BASE/src/pybatchrender
+pip install --no-deps -e .
+```
+
+**In the SLURM job:**
+```bash
+source /appl/profile/zz-csc-env.sh
+module purge
+module load pytorch/2.7
+
+BASE=/scratch/project_2013820/evgeruda
+source $BASE/venvs/pybatchrender-pt27/bin/activate
+cd $BASE/src/pybatchrender
+
+python examples/scripts/cartpole_benchmark.py --num-scenes 4096 --steps 50 --save-every 0 --save-num 0 --save-dir $BASE/outputs
+```
+
+This avoids huge `pip install torch*` downloads and works with EGL GPU rendering (V100).
 
 ### Puhti + Apptainer note
 
