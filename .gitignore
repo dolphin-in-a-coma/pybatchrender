@@ -7,3 +7,7 @@ __pycache__/
 build/
 *.png
 !pybatchrender/assets/**/*.png
+# local venvs / outputs
+.venv/
+.venv-host/
+outputs/
