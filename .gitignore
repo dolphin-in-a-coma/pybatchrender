@@ -7,6 +7,7 @@ __pycache__/
 build/
 *.png
 !pybatchrender/assets/**/*.png
+!clawding/tests/ref_frames/**/*.png
 # local venvs / outputs
 .venv/
 .venv-host/
