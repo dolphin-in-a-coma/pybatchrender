@@ -63,3 +63,21 @@ jobs:
             --device cpu \
             --json-out bench_ci.json
           cat bench_ci.json
+
+      - name: Frame compare (CPU baseline)
+        env:
+          DISPLAY: ""
+        run: |
+          rm -rf tmp_frames
+          python clawding/tests/compare_frames.py \
+            --env CartPole-v0 \
+            --num-scenes 16 \
+            --steps 2 \
+            --save-every 1 \
+            --save-num 4 \
+            --tile-resolution 64 64 \
+            --device cpu \
+            --seed 0 \
+            --out tmp_frames \
+            --ref clawding/tests/ref_frames_ci_cpu/CartPole-v0/res64 \
+            --max-mean-abs 0
