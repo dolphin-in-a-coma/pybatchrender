@@ -14,14 +14,27 @@ Add `--json-out results.json` for machine-readable results.
 
 ## 2) Frame regression test
 
-Generate frames + compare to reference PNGs.
+### Generate reference frames
+
+```bash
+python clawding/tests/generate_reference_frames.py \
+  --out clawding/tests/ref_frames \
+  --device cuda \
+  --num-scenes 128 \
+  --save-num 16 \
+  --steps 2 \
+  --seed 0
+```
+
+### Compare against reference PNGs
 
 ```bash
 python clawding/tests/compare_frames.py \
   --env CartPole-v0 \
   --num-scenes 16 --steps 2 --save-every 1 --save-num 4 \
+  --tile-resolution 64 64 \
   --out ./tmp_frames \
-  --ref ./ref_frames/cartpole \
+  --ref clawding/tests/ref_frames/CartPole-v0/res64 \
   --max-mean-abs 0
 ```
 

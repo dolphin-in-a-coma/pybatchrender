@@ -60,9 +60,6 @@ def main() -> None:
         tile_resolution=tuple(args.tile_resolution),
         render=True,
         offscreen=True,
-        save_every_steps=args.save_every,
-        save_examples_num=args.save_num,
-        save_out_dir=str(args.out),
         seed=args.seed,
     )
     if args.device is not None:
@@ -70,10 +67,22 @@ def main() -> None:
 
     env = pbr.envs.make(args.env, **kwargs)
 
+    def save_step(pixels, step_idx: int) -> Path:
+        # Deterministic, stable filename (no timestamps/random codes)
+        canvas = env._make_grid_frame(pixels, indices=list(range(min(args.save_num, args.num_scenes))), num=args.save_num, scale=1)
+        out_path = args.out / f"{args.env}_res{args.tile_resolution[0]}x{args.tile_resolution[1]}_step{step_idx}.png"
+        Image.fromarray(canvas).save(out_path)
+        return out_path
+
     td = env.reset()
     for step in range(args.steps):
         td["action"] = env.action_spec.rand()
         td = env.step(td)
+        pixels = td.get(("next", "pixels"), None)
+        if pixels is None:
+            raise SystemExit("No pixels in tensordict; render must be enabled")
+        if step % args.save_every == 0:
+            save_step(pixels, step)
         td = td["next"]
 
     # Compare all pngs created
