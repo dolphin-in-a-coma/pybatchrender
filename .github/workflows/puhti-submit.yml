@@ -31,7 +31,8 @@ on:
 jobs:
   submit:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    # Puhti jobs can sit in queue for >15 minutes, so allow a longer workflow runtime.
+    timeout-minutes: 120
 
     steps:
       - name: Checkout (for logs only)
