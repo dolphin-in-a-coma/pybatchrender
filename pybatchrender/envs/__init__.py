@@ -170,52 +170,52 @@ def _register_builtins() -> None:
     try:
         from .cartpole import CartPoleEnv, CartPoleRenderer, CartPoleConfig
         register("CartPole-v0", CartPoleEnv, CartPoleRenderer, CartPoleConfig)
-    except Exception:
+    except ImportError:
         pass
 
     # Steering
     try:
         from .steering import SteeringEnv, SteeringRenderer, SteeringConfig
         register("Steering-v0", SteeringEnv, SteeringRenderer, SteeringConfig)
-    except Exception:
+    except ImportError:
         pass
 
     # Pac-Man-like 2D environment
     try:
         from .pacman import PacManEnv, PacManRenderer, PacManConfig
         register("PacMan-v0", PacManEnv, PacManRenderer, PacManConfig)
-    except Exception:
+    except ImportError:
         pass
 
     # Atari-inspired environments
     try:
         from .pingpong import PingPongEnv, PingPongRenderer, PingPongConfig
         register("PingPong-v0", PingPongEnv, PingPongRenderer, PingPongConfig)
-    except Exception:
+    except ImportError:
         pass
 
     try:
         from .breakout import BreakoutEnv, BreakoutRenderer, BreakoutConfig
         register("Breakout-v0", BreakoutEnv, BreakoutRenderer, BreakoutConfig)
-    except Exception:
+    except ImportError:
         pass
 
     try:
         from .spaceinvaders import SpaceInvadersEnv, SpaceInvadersRenderer, SpaceInvadersConfig
         register("SpaceInvaders-v0", SpaceInvadersEnv, SpaceInvadersRenderer, SpaceInvadersConfig)
-    except Exception:
+    except ImportError:
         pass
 
     try:
         from .asteroids import AsteroidsEnv, AsteroidsRenderer, AsteroidsConfig
         register("Asteroids-v0", AsteroidsEnv, AsteroidsRenderer, AsteroidsConfig)
-    except Exception:
+    except ImportError:
         pass
 
     try:
         from .freeway import FreewayEnv, FreewayRenderer, FreewayConfig
         register("Freeway-v0", FreewayEnv, FreewayRenderer, FreewayConfig)
-    except Exception:
+    except ImportError:
         pass
 
 

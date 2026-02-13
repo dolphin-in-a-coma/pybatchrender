@@ -8,10 +8,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import torch
-
-# Import directly to avoid `pybatchrender.PBRRenderer` being `None` when optional
-# renderer deps (Panda3D/OpenGL) are unavailable.
-from pybatchrender.renderer.renderer import PBRRenderer
+from pybatchrender import PBRRenderer
 
 if TYPE_CHECKING:
     from .config import SteeringConfig
