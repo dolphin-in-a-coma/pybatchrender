@@ -76,19 +76,19 @@ mkdir -p "\$TMP_DIR"
 ENVS=(Asteroids-v0 Breakout-v0 CartPole-v0 Freeway-v0 PacMan-v0 PingPong-v0 SpaceInvaders-v0 Steering-v0)
 RES=(64 128 256 512)
 
-for ENV in "${ENVS[@]}"; do
-  for R in "${RES[@]}"; do
+for ENV in "\${ENVS[@]}"; do
+  for R in "\${RES[@]}"; do
     python clawding/tests/compare_frames.py \
-      --env $ENV \
+      --env \$ENV \
       --num-scenes 16 \
       --steps 2 \
       --save-every 1 \
       --save-num 4 \
-      --tile-resolution $R $R \
+      --tile-resolution \$R \$R \
       --device cuda \
       --seed 0 \
-      --out \$TMP_DIR/$ENV/res$R \
-      --ref $REF_DIR/$ENV/res$R \
+      --out \$TMP_DIR/\$ENV/res\$R \
+      --ref $REF_DIR/\$ENV/res\$R \
       --max-mean-abs 0
   done
 done
