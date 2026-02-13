@@ -77,61 +77,45 @@ def main() -> None:
 
     results: list[Result] = []
 
+    # Panda3D / ShowBase is not reliably re-entrant in a single process:
+    # creating multiple envs sequentially can hit "Attempt to spawn multiple ShowBase instances".
+    # We therefore benchmark each env in an isolated subprocess.
+
+    import subprocess
+    import sys
+
     for env_name in envs:
-        # Create env
-        kwargs = dict(
-            num_scenes=args.num_scenes,
-            tile_resolution=tuple(args.tile_resolution),
-            render=not args.no_render,
-            offscreen=not args.onscreen,
-        )
+        cmd = [
+            sys.executable,
+            "-m",
+            "clawding.tests.benchmark_one_env",
+            "--env",
+            env_name,
+            "--num-scenes",
+            str(args.num_scenes),
+            "--steps",
+            str(args.steps),
+            "--tile-resolution",
+            str(args.tile_resolution[0]),
+            str(args.tile_resolution[1]),
+            "--warmup-steps",
+            str(args.warmup_steps),
+        ]
         if args.device is not None:
-            kwargs["device"] = args.device
+            cmd += ["--device", args.device]
+        if args.no_render:
+            cmd += ["--no-render"]
+        if args.onscreen:
+            cmd += ["--onscreen"]
 
-        env = pbr.envs.make(env_name, **kwargs)
-
-        # Warmup
-        td = env.reset()
-        for _ in range(args.warmup_steps):
-            td["action"] = env.action_spec.rand()
-            td = env.step(td)["next"]
-
-        # Timed
-        t0 = time.perf_counter()
-        td = env.reset()
-        for _ in range(args.steps):
-            td["action"] = env.action_spec.rand()
-            td = env.step(td)["next"]
-        # Sync if on CUDA to include device work
-        if torch.cuda.is_available() and (args.device == "cuda" or (args.device is None and getattr(env, "device", None) == "cuda")):
-            try:
-                torch.cuda.synchronize()
-            except Exception:
-                pass
-        t1 = time.perf_counter()
-
-        wall = t1 - t0
-        fps = (args.steps * args.num_scenes) / max(wall, 1e-9)
-
-        device = args.device or getattr(env, "device", "unknown")
-        r = Result(
-            env=env_name,
-            num_scenes=args.num_scenes,
-            steps=args.steps,
-            device=str(device),
-            render=not args.no_render,
-            offscreen=not args.onscreen,
-            wall_s=wall,
-            fps=fps,
-        )
+        out = subprocess.check_output(cmd, text=True)
+        # The helper prints a single JSON line.
+        line = out.strip().splitlines()[-1]
+        payload = json.loads(line)
+        r = Result(**payload)
         results.append(r)
 
-        print(f"{env_name:16s} | wall={wall:7.3f}s | fps={fps:12.0f} | device={device} | render={not args.no_render}")
-
-        try:
-            env.close()
-        except Exception:
-            pass
+        print(f"{r.env:16s} | wall={r.wall_s:7.3f}s | fps={r.fps:12.0f} | device={r.device} | render={r.render}")
 
     if args.json_out:
         args.json_out.parent.mkdir(parents=True, exist_ok=True)

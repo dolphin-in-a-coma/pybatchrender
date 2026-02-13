@@ -8,6 +8,8 @@ These scripts are meant for quick performance + correctness checks.
 python clawding/tests/benchmark_all_envs.py --num-scenes 1024 --steps 200 --device cuda
 ```
 
+Implementation note: each env is benchmarked in a fresh subprocess to avoid Panda3D `ShowBase` re-entrancy issues.
+
 Add `--json-out results.json` for machine-readable results.
 
 ## 2) Frame regression test
