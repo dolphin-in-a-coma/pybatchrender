@@ -68,16 +68,19 @@ jobs:
         env:
           DISPLAY: ""
         run: |
-          rm -rf tmp_frames
-          python clawding/tests/compare_frames.py \
-            --env CartPole-v0 \
-            --num-scenes 16 \
-            --steps 2 \
-            --save-every 1 \
-            --save-num 4 \
-            --tile-resolution 64 64 \
-            --device cpu \
-            --seed 0 \
-            --out tmp_frames \
-            --ref clawding/tests/ref_frames_ci_cpu/CartPole-v0/res64 \
-            --max-mean-abs 0
+          ENVS=(Asteroids-v0 Breakout-v0 CartPole-v0 Freeway-v0 PacMan-v0 PingPong-v0 SpaceInvaders-v0 Steering-v0)
+          for ENV in "${ENVS[@]}"; do
+            rm -rf tmp_frames
+            python clawding/tests/compare_frames.py \
+              --env "$ENV" \
+              --num-scenes 16 \
+              --steps 2 \
+              --save-every 1 \
+              --save-num 4 \
+              --tile-resolution 64 64 \
+              --device cpu \
+              --seed 0 \
+              --out tmp_frames \
+              --ref "clawding/tests/ref_frames_ci_cpu/${ENV}/res64" \
+              --max-mean-abs 0
+          done
