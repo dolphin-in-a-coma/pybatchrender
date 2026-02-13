@@ -20,8 +20,8 @@ Add `--json-out results.json` for machine-readable results.
 python clawding/tests/generate_reference_frames.py \
   --out clawding/tests/ref_frames \
   --device cuda \
-  --num-scenes 128 \
-  --save-num 16 \
+  --num-scenes 16 \
+  --save-num 4 \
   --steps 2 \
   --seed 0
 ```

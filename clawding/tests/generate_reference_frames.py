@@ -32,8 +32,8 @@ def parse_args() -> argparse.Namespace:
     ap.add_argument("--envs", type=str, default=None, help="Comma-separated env list (default: all)")
     ap.add_argument("--resolutions", type=str, default="64,128,256,512", help="Comma-separated square tile resolutions")
 
-    ap.add_argument("--num-scenes", type=int, default=128)
-    ap.add_argument("--save-num", type=int, default=16)
+    ap.add_argument("--num-scenes", type=int, default=16)
+    ap.add_argument("--save-num", type=int, default=4)
     ap.add_argument("--steps", type=int, default=2)
     ap.add_argument("--save-every", type=int, default=1)
     ap.add_argument("--seed", type=int, default=0)
