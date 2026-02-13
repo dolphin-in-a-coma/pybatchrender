@@ -52,49 +52,38 @@ def main() -> None:
 
     resolutions = [int(x) for x in a.resolutions.split(",") if x.strip()]
 
+    # Like benchmarking, Panda3D ShowBase isn't reliably re-entrant.
+    # Generate each env in a fresh subprocess.
+    import subprocess
+    import sys
+
     for env_name in envs:
         for r in resolutions:
-            tile_res = (r, r)
-            kwargs = dict(
-                num_scenes=a.num_scenes,
-                tile_resolution=tile_res,
-                render=True,
-                offscreen=True,
-                seed=a.seed,
-            )
+            cmd = [
+                sys.executable,
+                "-m",
+                "clawding.tests.generate_reference_frames_one_env",
+                "--env",
+                env_name,
+                "--out",
+                str(a.out),
+                "--resolution",
+                str(r),
+                "--num-scenes",
+                str(a.num_scenes),
+                "--save-num",
+                str(a.save_num),
+                "--steps",
+                str(a.steps),
+                "--save-every",
+                str(a.save_every),
+                "--seed",
+                str(a.seed),
+            ]
             if a.device is not None:
-                kwargs["device"] = a.device
+                cmd += ["--device", a.device]
 
-            env = pbr.envs.make(env_name, **kwargs)
-
-            td = env.reset()
-            for step in range(a.steps):
-                td["action"] = env.action_spec.rand()
-                td = env.step(td)
-
-                pixels = td.get(("next", "pixels"), None)
-                if pixels is None:
-                    raise SystemExit(f"No pixels for env={env_name}; render must be enabled")
-
-                if step % a.save_every == 0:
-                    canvas = env._make_grid_frame(
-                        pixels,
-                        indices=list(range(min(a.save_num, a.num_scenes))),
-                        num=a.save_num,
-                        scale=1,
-                    )
-                    out_dir = a.out / env_name / f"res{r}"
-                    out_dir.mkdir(parents=True, exist_ok=True)
-                    out_path = out_dir / f"{env_name}_res{r}x{r}_step{step}.png"
-                    Image.fromarray(canvas).save(out_path)
-                    print("wrote", out_path)
-
-                td = td["next"]
-
-            try:
-                env.close()
-            except Exception:
-                pass
+            subprocess.check_call(cmd)
 
 
 if __name__ == "__main__":
