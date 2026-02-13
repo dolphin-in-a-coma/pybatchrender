@@ -19,6 +19,11 @@ jobs:
         with:
           python-version: '3.12'
 
+      - name: System deps (EGL/GL for Panda3D headless)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libegl1 libgl1 libglx0 libgles2 mesa-utils
+
       - name: Install
         run: |
           python -m pip install --upgrade pip
@@ -37,12 +42,24 @@ jobs:
         run: |
           python -m compileall -q pybatchrender clawding/tests examples
 
-      - name: CPU smoke benchmark (no render)
+      - name: CPU smoke benchmark (with rendering, headless)
+        env:
+          # Ensure we don't accidentally try to use X11/GLX.
+          DISPLAY: ""
         run: |
+          # Single env first (fast smoke):
+          python -m clawding.tests.benchmark_one_env \
+            --env CartPole-v0 \
+            --num-scenes 16 \
+            --steps 5 \
+            --tile-resolution 64 64 \
+            --warmup-steps 1 \
+            --device cpu
+
+          # Then all envs (still small):
           python clawding/tests/benchmark_all_envs.py \
-            --num-scenes 32 \
-            --steps 10 \
+            --num-scenes 16 \
+            --steps 5 \
             --device cpu \
-            --no-render \
             --json-out bench_ci.json
           cat bench_ci.json
