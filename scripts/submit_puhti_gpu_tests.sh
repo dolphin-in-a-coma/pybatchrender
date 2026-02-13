@@ -21,7 +21,11 @@ mkdir -p "$RESULTS_DIR"
 # But we DO need Panda3D (+ optional CUDA interop deps) inside the venv.
 
 ensure_venv() {
+  # CSC env init script is not `set -u` clean (references e.g. SLURM_JOB_ID).
+  # Temporarily disable nounset while sourcing.
+  set +u
   source /appl/profile/zz-csc-env.sh
+  set -u
   module purge
   module load pytorch/2.7
 
