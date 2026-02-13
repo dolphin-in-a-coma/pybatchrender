@@ -1,0 +1,48 @@
+name: CI
+
+on:
+  push:
+    branches: [ clawding, main, master ]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          # CPU-only torch is enough for CI; avoid huge CUDA wheels.
+          python -m pip install --index-url https://download.pytorch.org/whl/cpu torch torchvision torchaudio
+          python -m pip install -e '.[images]'
+
+      - name: Import sanity
+        run: |
+          python - <<'PY'
+          import pybatchrender as pbr
+          print('envs:', pbr.envs.list_envs())
+          PY
+
+      - name: Compile
+        run: |
+          python -m compileall -q pybatchrender clawding/tests examples
+
+      - name: CPU smoke benchmark (no render)
+        run: |
+          python clawding/tests/benchmark_all_envs.py \
+            --num-scenes 32 \
+            --steps 10 \
+            --device cpu \
+            --no-render \
+            --json-out bench_ci.json
+          cat bench_ci.json
