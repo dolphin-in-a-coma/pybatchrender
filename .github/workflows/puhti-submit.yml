@@ -48,21 +48,33 @@ jobs:
           # Preload host key
           ssh-keyscan -t ed25519 "$PUHTI_HOST" >> ~/.ssh/known_hosts
 
-          # Run remote submit
-          ssh -i ~/.ssh/id_ed25519 -o BatchMode=yes "$PUHTI_USER@$PUHTI_HOST" bash -lc "
-            set -euo pipefail
-            source /appl/profile/zz-csc-env.sh
-            module purge
-            cd '$BASE/src/pybatchrender'
-            git fetch --all
-            git checkout '$BRANCH'
-            git pull --ff-only
-            RESULTS_DIR='$BASE/test_results/gh_$(date +%Y%m%d_%H%M%S)'
-            mkdir -p \"$RESULTS_DIR\"
-            RESULTS_DIR=\"$RESULTS_DIR\" ACCOUNT='$ACCOUNT' USER_NAME='$PUHTI_USER' BASE='$BASE' bash ./scripts/submit_puhti_gpu_tests.sh
-            echo \"Results dir: $RESULTS_DIR\"
-          "
+          # Run remote submit.
+          # Use a stdin script to avoid brittle nested quoting.
+          ssh -i ~/.ssh/id_ed25519 -o BatchMode=yes "$PUHTI_USER@$PUHTI_HOST" \
+            "ACCOUNT='$ACCOUNT' BRANCH='$BRANCH' BASE='$BASE' USER_NAME='$PUHTI_USER' bash -s" <<'REMOTE'
+          set -eo pipefail
+
+          : "${ACCOUNT:?missing ACCOUNT}"
+          : "${BRANCH:?missing BRANCH}"
+          : "${BASE:?missing BASE}"
+          : "${USER_NAME:?missing USER_NAME}"
+
+          # Note: CSC /appl/profile/zz-csc-env.sh is not `set -u` clean.
+          source /appl/profile/zz-csc-env.sh
+          module purge
+
+          cd "$BASE/src/pybatchrender"
+          git fetch --all
+          git checkout "$BRANCH"
+          git pull --ff-only
+
+          RESULTS_DIR="$BASE/test_results/gh_$(date +%Y%m%d_%H%M%S)"
+          mkdir -p "$RESULTS_DIR"
+
+          RESULTS_DIR="$RESULTS_DIR" ACCOUNT="$ACCOUNT" USER_NAME="$USER_NAME" BASE="$BASE" bash ./scripts/submit_puhti_gpu_tests.sh
+          echo "Results dir: $RESULTS_DIR"
+          REMOTE
 
       - name: Notes
         run: |
-          echo "This workflow only submits jobs. For results, check the printed Results dir on Puhti." 
+          echo "This workflow only submits jobs. For results, check the printed Results dir on Puhti."
