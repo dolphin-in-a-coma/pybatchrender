@@ -43,6 +43,17 @@ def main() -> None:
     if a.device is not None:
         kwargs["device"] = a.device
 
+    # Make action sampling deterministic
+    import random
+    import numpy as np
+    import torch
+
+    random.seed(a.seed)
+    np.random.seed(a.seed)
+    torch.manual_seed(a.seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(a.seed)
+
     env = pbr.envs.make(a.env, **kwargs)
 
     td = env.reset()

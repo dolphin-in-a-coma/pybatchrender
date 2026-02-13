@@ -65,6 +65,15 @@ def main() -> None:
     if args.device is not None:
         kwargs["device"] = args.device
 
+    # Make action sampling deterministic
+    import random
+    random.seed(args.seed)
+    np.random.seed(args.seed)
+    import torch
+    torch.manual_seed(args.seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(args.seed)
+
     env = pbr.envs.make(args.env, **kwargs)
 
     def save_step(pixels, step_idx: int) -> Path:
