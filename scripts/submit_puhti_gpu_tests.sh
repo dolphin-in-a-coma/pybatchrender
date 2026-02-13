@@ -16,6 +16,52 @@ RESULTS_DIR=${RESULTS_DIR:-$BASE/test_results/$STAMP}
 
 mkdir -p "$RESULTS_DIR"
 
+# --- Ensure venv + renderer deps exist on the login node ---
+# We use CSC module torch (pytorch/2.7) and avoid pip-installing torch.
+# But we DO need Panda3D (+ optional CUDA interop deps) inside the venv.
+
+ensure_venv() {
+  source /appl/profile/zz-csc-env.sh
+  module purge
+  module load pytorch/2.7
+
+  if [[ ! -d "$SRC/.git" ]]; then
+    echo "ERROR: expected repo at $SRC (clone first)" >&2
+    return 2
+  fi
+
+  if [[ ! -d "$VENV" ]]; then
+    echo "Creating venv: $VENV"
+    python -m venv --system-site-packages "$VENV"
+  fi
+
+  # Activate and test imports.
+  # Note: `python` should be from module env; venv contains site-packages for extras.
+  # shellcheck disable=SC1090
+  source "$VENV/bin/activate"
+
+  python - <<'PY' || NEED_DEPS=1
+import panda3d
+print('panda3d ok:', panda3d.__version__)
+PY
+
+  if [[ "${NEED_DEPS:-0}" == "1" ]]; then
+    echo "Installing renderer deps into venv (panda3d + optional cuda extras)..."
+    pip install -U pip
+    pip install 'panda3d>=1.10.13'
+
+    # Optional CUDA interop deps (can be heavy; keep enabled because tests request CUDA path)
+    pip install 'cuda-python>=12,<12.9' 'cupy-cuda12x>=12' 'PyOpenGL>=3.1'
+  fi
+
+  echo "Installing pybatchrender editable (no deps)..."
+  cd "$SRC"
+  pip install --no-deps -e .
+}
+
+ensure_venv
+
+
 cat > "$RESULTS_DIR/sbatch_bench_all_envs.sh" <<EOF
 #!/bin/bash
 #SBATCH --job-name=pbr-bench-all
