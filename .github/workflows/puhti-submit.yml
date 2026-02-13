@@ -15,6 +15,18 @@ on:
         description: "Scratch base dir on Puhti (e.g. /scratch/project_2013820/evgeruda)"
         required: true
         default: "/scratch/project_2013820/evgeruda"
+      wait:
+        description: "Wait for SLURM jobs to finish and print PASS/FAIL summary"
+        required: true
+        default: "true"
+      wait_timeout_minutes:
+        description: "Max minutes to wait for SLURM jobs"
+        required: true
+        default: "90"
+      poll_seconds:
+        description: "Polling interval for SLURM queue"
+        required: true
+        default: "30"
 
 jobs:
   submit:
@@ -34,6 +46,9 @@ jobs:
           ACCOUNT: ${{ inputs.account }}
           BRANCH: ${{ inputs.branch }}
           BASE: ${{ inputs.base }}
+          WAIT: ${{ inputs.wait }}
+          WAIT_TIMEOUT_MINUTES: ${{ inputs.wait_timeout_minutes }}
+          POLL_SECONDS: ${{ inputs.poll_seconds }}
         run: |
           if [[ -z "${PUHTI_HOST}" || -z "${PUHTI_USER}" || -z "${PUHTI_SSH_KEY}" ]]; then
             echo "Missing secrets. Please set repository secrets: PUHTI_HOST, PUHTI_USER, PUHTI_SSH_KEY" >&2
@@ -51,13 +66,16 @@ jobs:
           # Run remote submit.
           # Use a stdin script to avoid brittle nested quoting.
           ssh -i ~/.ssh/id_ed25519 -o BatchMode=yes "$PUHTI_USER@$PUHTI_HOST" \
-            "ACCOUNT='$ACCOUNT' BRANCH='$BRANCH' BASE='$BASE' USER_NAME='$PUHTI_USER' bash -s" <<'REMOTE'
+            "ACCOUNT='$ACCOUNT' BRANCH='$BRANCH' BASE='$BASE' USER_NAME='$PUHTI_USER' WAIT='$WAIT' WAIT_TIMEOUT_MINUTES='$WAIT_TIMEOUT_MINUTES' POLL_SECONDS='$POLL_SECONDS' bash -s" <<'REMOTE'
           set -eo pipefail
 
           : "${ACCOUNT:?missing ACCOUNT}"
           : "${BRANCH:?missing BRANCH}"
           : "${BASE:?missing BASE}"
           : "${USER_NAME:?missing USER_NAME}"
+          : "${WAIT:?missing WAIT}"
+          : "${WAIT_TIMEOUT_MINUTES:?missing WAIT_TIMEOUT_MINUTES}"
+          : "${POLL_SECONDS:?missing POLL_SECONDS}"
 
           # Note: CSC /appl/profile/zz-csc-env.sh is not `set -u` clean.
           source /appl/profile/zz-csc-env.sh
@@ -71,10 +89,78 @@ jobs:
           RESULTS_DIR="$BASE/test_results/gh_$(date +%Y%m%d_%H%M%S)"
           mkdir -p "$RESULTS_DIR"
 
-          RESULTS_DIR="$RESULTS_DIR" ACCOUNT="$ACCOUNT" USER_NAME="$USER_NAME" BASE="$BASE" bash ./scripts/submit_puhti_gpu_tests.sh
+          echo "Submitting SLURM jobs..."
+          SUBMIT_OUT=$(RESULTS_DIR="$RESULTS_DIR" ACCOUNT="$ACCOUNT" USER_NAME="$USER_NAME" BASE="$BASE" bash ./scripts/submit_puhti_gpu_tests.sh)
+          echo "$SUBMIT_OUT"
+
+          BENCH_JOB=$(echo "$SUBMIT_OUT" | grep -E '^\- bench_all_envs:' | awk '{print $3}')
+          CMP_JOB=$(echo "$SUBMIT_OUT" | grep -E '^\- compare_frames:' | awk '{print $3}')
+
           echo "Results dir: $RESULTS_DIR"
+          echo "BENCH_JOB: ${BENCH_JOB:-}" 
+          echo "CMP_JOB: ${CMP_JOB:-}" 
+
+          if [[ -z "${BENCH_JOB:-}" || -z "${CMP_JOB:-}" ]]; then
+            echo "ERROR: failed to parse job IDs from submit output" >&2
+            exit 3
+          fi
+
+          if [[ "$WAIT" != "true" ]]; then
+            echo "WAIT=$WAIT; not waiting for job completion."
+            exit 0
+          fi
+
+          echo "Waiting up to ${WAIT_TIMEOUT_MINUTES} minutes for jobs to finish..."
+          DEADLINE=$(( $(date +%s) + WAIT_TIMEOUT_MINUTES*60 ))
+
+          wait_job() {
+            local jid=$1
+            while true; do
+              if (( $(date +%s) > DEADLINE )); then
+                echo "TIMEOUT waiting for job $jid" >&2
+                return 124
+              fi
+              if squeue -j "$jid" -h 2>/dev/null | grep -q .; then
+                echo "[$(date -Is)] job $jid still in queue"
+                sleep "$POLL_SECONDS"
+              else
+                echo "[$(date -Is)] job $jid left queue"
+                return 0
+              fi
+            done
+          }
+
+          wait_job "$BENCH_JOB"
+          wait_job "$CMP_JOB"
+
+          # Give sacct a moment to catch up
+          sleep 2
+
+          echo
+          echo "sacct summary:"
+          sacct -j "$BENCH_JOB" -n -P --format=JobID,State,ExitCode | head -n 5 || true
+          sacct -j "$CMP_JOB" -n -P --format=JobID,State,ExitCode | head -n 5 || true
+
+          CMP_OUT="$RESULTS_DIR/compare-${CMP_JOB}.out"
+          echo
+          echo "compare output: $CMP_OUT"
+          if [[ -f "$CMP_OUT" ]]; then
+            if grep -q "ALL_PASS" "$CMP_OUT"; then
+              echo "COMPARE_FRAMES: PASS"
+            else
+              echo "COMPARE_FRAMES: FAIL (tail)"
+              tail -n 120 "$CMP_OUT" || true
+              exit 2
+            fi
+          else
+            echo "COMPARE_FRAMES: missing output file ($CMP_OUT)" >&2
+            ls -la "$RESULTS_DIR" || true
+            exit 2
+          fi
+
+          echo "ALL_PASS"
           REMOTE
 
       - name: Notes
         run: |
-          echo "This workflow only submits jobs. For results, check the printed Results dir on Puhti."
+          echo "This workflow only submits jobs. For results, check the printed Results dir on Puhti." 
