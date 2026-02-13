@@ -88,7 +88,7 @@ for ENV in "\${ENVS[@]}"; do
       --device cuda \
       --seed 0 \
       --out \$TMP_DIR/\$ENV/res\$R \
-      --ref $REF_DIR/\$ENV/res\$R \
+      --ref \$REF_DIR/\$ENV/res\$R \
       --max-mean-abs 0
   done
 done
